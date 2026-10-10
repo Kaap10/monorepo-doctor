@@ -15,10 +15,10 @@ File cycles cause `undefined` at import time in ESM/CJS and block tree-shaking.
 1. If Nx is installed, refresh the graph and use it as the package graph:
    ```bash
    W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
-   npx nx graph --file="$W/nx-graph.json"
+   NX_DAEMON=false NX_NO_CLOUD=true NX_WORKSPACE_DATA_DIRECTORY="$W/nx-data" npx nx graph --file="$W/nx-graph.json"
    ```
    The file has `graph.dependencies[project] = [{ target }]`. Otherwise use `workspace.json` `workspaceDeps`.
-   If Turborepo is installed, `npx turbo run build --dry=json` failing with a message containing `cyclic` is also evidence.
+   If Turborepo is installed, `TURBO_TELEMETRY_DISABLED=1 npx turbo run build --dry=json` failing with a message containing `cyclic` is also evidence. Turbo dry-run JSON writes no project files beyond Turborepo's own cache directory.
    Status: the `workspaceDeps` graph is complete for package.json-based workspaces, so missing turbo does **not** make this check partial. Under Nx without a local install, mark `partial` with reason `nx not installed; project graph inferred from package.json only` (Nx also infers edges from imports and `implicitDependencies`).
 2. Run the cycle snippet:
 
@@ -85,7 +85,11 @@ for (const [pkg, edges] of Object.entries(scan.fileEdges)) {
     });
   }
 }
-fs.writeFileSync(path.join(work, 'findings', 'circular-deps.json'), JSON.stringify({ status: 'ok', findings }, null, 2));
+const nx = ws.orchestrators.find((o) => o.name === 'nx');
+const status = nx && !nx.installed && !fs.existsSync(nxGraphPath) ? 'partial' : 'ok';
+const result = { status, findings };
+if (status === 'partial') result.reason = 'nx not installed; project graph inferred from package.json only';
+fs.writeFileSync(path.join(work, 'findings', 'circular-deps.json'), JSON.stringify(result, null, 2));
 console.log(JSON.stringify({ packageCycles: findings.filter((f) => f.id.endsWith('package-cycle')).length, fileCycles: findings.filter((f) => f.id.endsWith('file-cycle')).length }));
 EOF
 node "$W/cycles.mjs"

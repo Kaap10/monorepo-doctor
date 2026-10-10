@@ -10,7 +10,7 @@ Requires Node ≥ 22.5.
 
 | Check | What it looks for | Example finding ids |
 |---|---|---|
-| Package boundaries | Packages that are too large, import through another package's internals, skip declared workspace dependencies, or lack Nx/Turbo boundary enforcement. | `boundaries/deep-import`, `boundaries/nx-missing-module-boundaries-rule`, `boundaries/turbo-boundaries-violation` |
+| Package boundaries | Packages that are too large, import through another package's internals, have knip unlisted/unused dependencies, or lack Nx/Turbo boundary enforcement. | `boundaries/deep-import`, `boundaries/nx-missing-module-boundaries-rule`, `boundaries/turbo-boundaries-violation` |
 | Circular dependencies | Package-level cycles and value-import file cycles that break topological builds, publishing, and ESM/CJS initialization. | `circular-deps/package-cycle`, `circular-deps/file-cycle` |
 | Task caching | Nx/Turbo cache configuration that can replay stale results or miss useful cache hits: missing outputs, undeclared env vars, volatile inputs, and dependency-blind test caches. | `caching/missing-outputs`, `caching/undeclared-env`, `caching/build-inputs-include-tests` |
 | CI test coverage | CI paths where tests silently do not run for changed code: no test command, shallow affected checkout, missing Nx base refs, or undeclared workspace dependencies. | `ci-coverage/tests-not-run-in-ci`, `ci-coverage/shallow-checkout-affected`, `ci-coverage/turbo-test-missing-dependson` |
@@ -70,7 +70,7 @@ Severities follow the skill's rubric:
 | `critical` | Wrong code can ship or tests are silently skipped for real changes |
 | `high` | Likely incorrect builds/caching or broken CI signal |
 | `medium` | Correctness risk under specific conditions, or a boundary erosion |
-| `low` | Hygiene, performance, or maintainability |
+| `low` | Hygiene, performance, cache efficiency, or maintainability |
 
 A short Markdown excerpt looks like this:
 
@@ -109,15 +109,15 @@ test/fixtures/button.json
 
 ## Guarantees
 
-`monorepo-doctor` is read-only. It must not install dependencies, build, run tests, or edit project files. The only allowed writes are `monorepo-doctor-report.md`, `monorepo-doctor-report.json`, and the skill work directory `$W`, where `$W` is `$(node -p 'require("os").tmpdir()')/monorepo-doctor`.
+`monorepo-doctor` is read-only. It must not install dependencies, build, run tests, or edit project files. The only allowed writes are `monorepo-doctor-report.md`, `monorepo-doctor-report.json`, and the skill work directory `$W`, where `$W` is `$(node -p 'require("os").tmpdir()')/monorepo-doctor`. The snippets require a POSIX shell (macOS, Linux, or WSL).
 
-The skill may run the Node snippets in `skills/monorepo-doctor/references`, `npm pack --dry-run --json --ignore-scripts`, `npx --yes knip`, and `npx --yes publint`. It may run `npx nx` or `npx turbo` only when detection finds a local `node_modules/.bin/nx` or `node_modules/.bin/turbo`; those commands are limited to graph, dry-run JSON, and boundaries inspection, never real task execution.
+The skill may run the Node snippets in `skills/monorepo-doctor/references`, `npm pack --dry-run --json --ignore-scripts`, `npx --yes knip`, and `npm_config_ignore_scripts=true npx --yes publint`. It may run `npx nx` or `npx turbo` only when detection finds a local `node_modules/.bin/nx` or `node_modules/.bin/turbo`; those commands are limited to graph, dry-run JSON, and boundaries inspection, never real task execution. Nx graph runs as `NX_DAEMON=false NX_NO_CLOUD=true NX_WORKSPACE_DATA_DIRECTORY="$W/nx-data" npx nx graph --file="$W/nx-graph.json"` so it does not create `.nx/workspace-data` in the audited repo or start the daemon. Turbo commands use `TURBO_TELEMETRY_DISABLED=1`; `turbo --dry=json` and `turbo boundaries` should not write project files beyond Turborepo's own cache directory.
 
-Without `node_modules`, dependency-resolution checks such as `knip` and `publint` are skipped or marked `partial`. Without a local Nx or Turborepo binary, the skill still performs static config analysis, but graph refreshes, Turbo dry-run hash comparisons, and `turbo boundaries` are skipped or marked `partial`.
+Without `node_modules`, dependency-resolution checks such as `knip` and `publint` are skipped or marked `partial` (publint is skipped when `node_modules` is missing). `knip` and Nx load repository configuration files, which can execute config code; run the skill only on repositories you trust. Without a local Nx or Turborepo binary, the skill still performs static config analysis, but graph refreshes, Turbo dry-run hash comparisons, and `turbo boundaries` are skipped or marked `partial`.
 
 ## CI example
 
-This example runs the skill in a GitHub Actions job and uploads both reports. Replace the agent command with the non-interactive CLI for your environment.
+This example runs the skill in a GitHub Actions job and uploads both reports. Replace the agent command with the non-interactive CLI for your environment. The threshold check must be a separate workflow step after the agent writes the report; an agent-internal threshold cannot fail the job reliably. The example does not install dependencies, so knip/Nx/Turbo sub-steps will be partial; for best coverage, run it after your normal dependency install step.
 
 ```yaml
 name: monorepo-doctor
@@ -140,7 +140,22 @@ jobs:
 
       - name: Run monorepo-doctor (adapt to your agent)
         run: |
-          copilot --non-interactive "Run monorepo-doctor in CI mode, fail on high. Write reports to $PWD."
+          copilot -p "Run the monorepo-doctor skill on this repo and write reports to ./" --allow-all-tools
+
+      - name: Fail on high findings
+        run: |
+          node -e '
+          const fs = require("node:fs");
+          const order = ["low", "medium", "high", "critical"];
+          const reportPath = process.argv[1];
+          const threshold = process.argv[2] || "high";
+          const min = order.indexOf(threshold);
+          if (!reportPath || min === -1) process.exit(2);
+          const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+          const bad = (report.findings || []).filter((f) => order.indexOf(f.severity) >= min);
+          for (const f of bad) console.error(`${f.severity.toUpperCase()} ${f.id} ${f.location?.file ?? "—"}`);
+          process.exit(bad.length ? 1 : 0);
+          ' monorepo-doctor-report.json high
 
       - name: Upload monorepo-doctor report
         if: always()
