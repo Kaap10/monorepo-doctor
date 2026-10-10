@@ -1,0 +1,11 @@
+{
+  "name": "turborepo-fixture",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": { "turbo": "^2.5.0" }
+}

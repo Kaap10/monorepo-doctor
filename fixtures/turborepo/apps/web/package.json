@@ -1,0 +1,10 @@
+{
+  "name": "@tf/web",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": { "@tf/clean": "workspace:*" }
+}

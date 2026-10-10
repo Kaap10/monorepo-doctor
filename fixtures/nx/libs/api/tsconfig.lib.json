@@ -1,0 +1,5 @@
+{
+  "compilerOptions": { "outDir": "lib", "module": "ESNext", "target": "ES2022", "moduleResolution": "Bundler" },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

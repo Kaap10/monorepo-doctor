@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "outDir": "dist", "declaration": true, "module": "ESNext", "target": "ES2022", "moduleResolution": "Bundler" },
+  "include": ["src"]
+}

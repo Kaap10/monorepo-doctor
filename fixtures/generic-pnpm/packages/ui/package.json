@@ -1,0 +1,14 @@
+{
+  "name": "@acme/ui",
+  "version": "1.0.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@acme/app": "workspace:*",
+    "vitest": "^2.1.0"
+  }
+}

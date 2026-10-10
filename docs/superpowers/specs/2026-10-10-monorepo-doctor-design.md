@@ -87,9 +87,9 @@ monorepo-doctor/
 | 2 | Circular deps | Workspace package-graph cycles from `package.json` deps (`high`); file-level cycles via `madge --circular --extensions ts,tsx,js,jsx` per package (`medium`) | Cycles in `nx graph --file=<tmp>.json` | Cycles in the `turbo run build --dry=json` task graph |
 | 3 | Caching | Root scripts that chain full builds with no caching layer (`low`) | Cacheable targets missing `outputs`; `production` namedInput missing or not excluding tests; env vars read in code but absent from `inputs` (`medium`/`high`) | Tasks missing `outputs`; `env`/`globalEnv` gaps; `cache: false` on deterministic tasks; two consecutive `--dry=json` runs with differing hashes, diffed to find the unstable input (`high`) |
 | 4 | Missed tests in CI | Relative (`../../other-pkg`) or tsconfig-path imports that cross packages with no declared dep, so affected-only CI misses dependents (`critical`); packages with test files but no `test` script (`high`) | `affected` base/head setup in CI workflow files; `test` inputs not covering source files | `test` task missing `dependsOn`/`inputs`; `--filter=[<ref>]` usage in CI workflow files |
-| 5 | Prod leakage | `publint` on each publishable (non-private) package; `npm pack --dry-run --json` contents containing `*.spec.*`, `*.test.*`, `__tests__`, `__mocks__`, fixtures (`critical`); build `tsconfig` including test files (`high`); test libraries in `dependencies` instead of `devDependencies` (`high`) | Build target inputs or outputs including test files | Build task inputs or outputs including test files |
+| 5 | Prod leakage | `publint` on each publishable (non-private) package; `npm pack --dry-run --json --ignore-scripts` contents containing `*.spec.*`, `*.test.*`, `__tests__`, `__mocks__`, fixtures (`critical`); build `tsconfig` including test files (`high`); test libraries in `dependencies` instead of `devDependencies` (`high`) | Build target inputs or outputs including test files | Build task inputs or outputs including test files |
 
-The CI workflow files scanned are `.github/workflows/*`, `.gitlab-ci.yml`, `azure-pipelines.yml`, and `.circleci/config.yml`.
+The CI workflow files scanned are `.github/workflows/*`, `.gitlab-ci.yml`, `azure-pipelines.yml`, `.circleci/config.yml`, `bitbucket-pipelines.yml`, `Jenkinsfile`, `.buildkite/*`, and `.travis.yml`. Local GitLab includes and local reusable GitHub workflows are followed by the CI check.
 
 ## Severity rubric
 
@@ -106,9 +106,9 @@ JSON (`monorepo-doctor-report.json`):
 {
   "version": 1,
   "generatedAt": "ISO-8601",
-  "workspace": { "packageManager": "pnpm", "orchestrators": ["nx"], "packageCount": 12 },
+  "workspace": { "packageManager": "pnpm", "orchestrators": [{ "name": "nx", "installed": true }], "packageCount": 12 },
   "summary": { "critical": 0, "high": 0, "medium": 0, "low": 0 },
-  "checks": [{ "id": "circular-deps", "status": "ran|skipped|partial", "reason": "string?" }],
+  "checks": [{ "check": "circular-deps", "status": "ok|skipped|partial|not-run", "reason": "string?" }],
   "findings": [{
     "id": "circular-deps/package-cycle",
     "check": "circular-deps",
@@ -128,14 +128,14 @@ Markdown (`monorepo-doctor-report.md`) contains a header with workspace facts, a
 ## Error handling
 
 - If a tool is unavailable or fails, the check is marked `skipped` or `partial` with the reason, and the audit continues. Where possible, a manual fallback is used (e.g. grep-based import scan instead of `madge`).
-- The skill never runs `install`, `build`, `test`, or any command that writes outside the report files and the OS temp dir. `npm pack --dry-run` and `turbo --dry` are allowed because they write nothing.
+- The skill never runs `install`, `build`, `test`, or any command that writes outside the report files and `$W`. `npm pack --dry-run --ignore-scripts`, Nx graph with `NX_WORKSPACE_DATA_DIRECTORY="$W/nx-data"`, and Turbo dry runs/boundaries with telemetry disabled are allowed because they avoid project writes aside from known tool cache behavior.
 - If no workspace is detected, the skill stops and reports that clearly.
 
 ## Testing
 
-- Three fixture repos (`generic-pnpm`, `nx`, `turborepo`), each seeded with at least one issue per check, plus a clean control package.
+- Three fixture repos (`generic-pnpm`, `nx`, `turborepo`) plus clean control packages. Generic-pnpm covers all five checks; nx and turborepo cover orchestrator-specific caching/CI/boundaries rules. Some rules (volatile-input, unstable-hash, turbo-boundaries-violation, nx-permissive-module-boundaries, non-GitHub CI) are verified by reasoning only.
 - `fixtures/expected/<fixture>.json` lists the finding `id`s each fixture must produce.
-- Verification: run the skill against each fixture with a subagent, then confirm that every expected `id` appears and the clean package has no findings.
+- Verification: generate reports for each fixture, then confirm every expected `id` appears and clean packages have no medium+ findings.
 
 ## Open questions
 
@@ -147,9 +147,10 @@ None.
 2. `npx nx` / `npx turbo` only run when `node_modules/.bin/nx|turbo` exists; otherwise static config analysis and the check is marked `partial`.
 3. A shared source-scan phase (`references/scan.md`) produces imports, intra-package file edges, env reads, test files and size for all checks.
 4. File-level cycles use the built-in scan (skips `import type`) instead of madge.
-5. "Build inputs include tests" moved from prod-leakage to caching as `caching/build-inputs-include-tests`.
+5. "Build inputs include tests" moved from prod-leakage to caching as `caching/build-inputs-include-tests` (low).
 6. Added `prod-leakage/test-files-in-build-output`.
 7. Added check status `not-run` for user-scoped audits.
 8. Checks write `findings/<check>.json`; a render snippet produces both reports.
 9. `ci-coverage/test-inputs-incomplete` renamed `ci-coverage/nx-test-inputs-ignore-deps`.
 10. Config-level findings (Turbo tasks, Nx targetDefaults) carry no `location.package`.
+11. Drift from initial spec: check status `ran` became `ok`; `checks[].id` became `checks[].check`; `workspace.orchestrators` holds `{ name, installed }`; `caching/build-inputs-include-tests` severity was lowered to `low`; a missing findings file renders as `skipped` with reason `no findings file`.
