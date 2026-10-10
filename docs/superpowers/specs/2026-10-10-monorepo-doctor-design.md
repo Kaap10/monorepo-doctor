@@ -140,3 +140,16 @@ Markdown (`monorepo-doctor-report.md`) contains a header with workspace facts, a
 ## Open questions
 
 None.
+
+## Implementation notes (decided during planning)
+
+1. External CLIs run via `npx --yes` (ships with Node; no global installs).
+2. `npx nx` / `npx turbo` only run when `node_modules/.bin/nx|turbo` exists; otherwise static config analysis and the check is marked `partial`.
+3. A shared source-scan phase (`references/scan.md`) produces imports, intra-package file edges, env reads, test files and size for all checks.
+4. File-level cycles use the built-in scan (skips `import type`) instead of madge.
+5. "Build inputs include tests" moved from prod-leakage to caching as `caching/build-inputs-include-tests`.
+6. Added `prod-leakage/test-files-in-build-output`.
+7. Added check status `not-run` for user-scoped audits.
+8. Checks write `findings/<check>.json`; a render snippet produces both reports.
+9. `ci-coverage/test-inputs-incomplete` renamed `ci-coverage/nx-test-inputs-ignore-deps`.
+10. Config-level findings (Turbo tasks, Nx targetDefaults) carry no `location.package`.
