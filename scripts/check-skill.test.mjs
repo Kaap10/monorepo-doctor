@@ -1,19 +1,18 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { checkSkill, parseFrontmatter } from './check-skill.mjs';
 
 const roots = [];
-let seq = 0;
 after(() => {
   for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
 });
 
 function makeSkill({ name = 'demo-skill', description = 'Use when testing.', body = 'See references/a.md.', refs = { 'a.md': 'Defines `x/y`.' }, expected } = {}) {
-  const root = path.join(process.cwd(), 'scripts', '.test-work', `check-skill-${process.pid}-${seq++}`);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'check-skill-'));
   roots.push(root);
-  fs.rmSync(root, { recursive: true, force: true });
   const dir = path.join(root, 'demo-skill');
   fs.mkdirSync(path.join(dir, 'references'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`);
@@ -29,6 +28,10 @@ test('parseFrontmatter reads name and description', () => {
   assert.equal(parseFrontmatter('no frontmatter'), null);
 });
 
+test('parseFrontmatter accepts CRLF and closing marker at EOF', () => {
+  assert.deepEqual(parseFrontmatter('---\r\nname: a\r\ndescription: Use when x\r\n---'), { name: 'a', description: 'Use when x' });
+});
+
 test('valid skill has no errors', () => {
   const { dir, expDir } = makeSkill({ expected: { mustFind: [{ id: 'x/y' }], cleanPackages: [] } });
   assert.deepEqual(checkSkill(dir, expDir), []);
@@ -42,6 +45,11 @@ test('name must match directory', () => {
 test('description must start with "Use when"', () => {
   const { dir, expDir } = makeSkill({ description: 'Audits things.' });
   assert.ok(checkSkill(dir, expDir).some((e) => e.includes('Use when')));
+});
+
+test('description longer than 1024 characters is reported', () => {
+  const { dir, expDir } = makeSkill({ description: `Use when ${'x'.repeat(1025)}` });
+  assert.ok(checkSkill(dir, expDir).some((e) => e.includes('exceeds 1024')));
 });
 
 test('unlinked and missing references are reported', () => {
