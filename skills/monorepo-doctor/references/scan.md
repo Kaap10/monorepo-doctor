@@ -11,7 +11,7 @@ Reads `workspace.json`, walks every package's source files, and writes `$W/scan.
 
 `kind`: `relative` (`../../other-pkg/src/x`), `package` (`@scope/pkg/sub`), `alias` (tsconfig `paths`).
 `declared`: the importing package lists the target in any dependency field.
-`deep`: the import bypasses the target's public API — any `relative` cross-package import, a package subpath starting with `src/`, `lib/` or `internal/`, or a subpath not covered by the target's `exports` keys. Alias imports are resolved to the target package first; aliases to the target entry point stay non-deep, while aliases into `src/lib/internal` or unexported subpaths are deep.
+`deep`: the import bypasses the target's public API — any `relative` cross-package import, a package subpath starting with `src/`, `lib/` or `internal/`, or a subpath not covered by the target's `exports` keys. Alias imports are resolved to the target package first; aliases to the target entry point stay non-deep, while aliases to any non-entry file are deep.
 
 ```bash
 W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
@@ -93,7 +93,7 @@ function isEntrySubpath(pkg, subpath) {
   else if (pkg.exports && typeof pkg.exports === 'object' && pkg.exports['.'] !== undefined && pkg.exports['.'] !== null) {
     for (const v of entryValues(pkg.exports['.'])) entries.add(norm(v));
   }
-  return entries.has(bare) || /(^|\/)index\.[cm]?[jt]sx?$/.test(subpath);
+  return entries.has(bare);
 }
 function lineStarts(text) {
   const starts = [0];
@@ -123,12 +123,13 @@ for (const pkg of ws.packages) {
   const edges = [];
   for (const abs of files) {
     const file = toPosix(path.relative(root, abs));
-    const isTest = TEST.test(file);
+    const packageRel = pkg.dir === '.' ? file : file.slice(pkg.dir.length + 1);
+    const isTest = TEST.test(packageRel);
     const text = fs.readFileSync(abs, 'utf8');
     const starts = lineStarts(text);
     if (isTest) info.testFiles.push(file); else { info.sourceFiles++; info.loc += text.split('\n').length; }
     const specs = [];
-    const importRe = /^[ \t]*(import|export)\s+(type\s+)?((?:[\w$*{},\s]|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*?\bfrom\s*)?['"]([^'"\n]+)['"]/gm;
+    const importRe = /^[ \t]*(import|export)\s+(type\s+)?((?:(?!\n[ \t]*(?:import|export)\b)[\w$*{},\s]|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*?\bfrom\s*)?['"]([^'"\n]+)['"]/gm;
     for (const m of text.matchAll(importRe)) {
       if (m[2]) continue;
       if (m[1] === 'export' && !m[3]) continue;
@@ -166,7 +167,7 @@ for (const pkg of ws.packages) {
       const tp = byName.get(target);
       const entry = isEntrySubpath(tp, subpath);
       const deep = kind === 'relative'
-        || (kind === 'alias' ? (!entry && (/^src\/lib\/internal(\/|$)/.test(subpath) || (subpath !== '' && !covered(tp, subpath))))
+        || (kind === 'alias' ? !entry
           : (/^(src|lib|internal)(\/|$)/.test(subpath) || (subpath !== '' && !covered(tp, subpath))));
       scan.imports.push({ from: pkg.name, target, kind, spec, subpath, file, line, isTest, declared: pkg.workspaceDeps.includes(target), deep });
     }

@@ -1,6 +1,8 @@
 # Phase 1 — Detection
 
 Goal: build an inventory at `$W/workspace.json`. Every later phase reads it.
+
+Requires Node ≥ 22.5 because this phase uses `path.matchesGlob`.
 This phase resets the work directory. In every shell, start with `W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"`; all later phases reuse `$W`, and you should recompute it in each new shell.
 
 Run from the workspace root (the directory the user pointed at; default: current directory):
@@ -112,7 +114,6 @@ for (const [dir, source] of dirs) {
   const name = pkg.name ?? proj?.name ?? dir;
   const exportKeys = typeof pkg.exports === 'string' ? ['.']
     : pkg.exports && typeof pkg.exports === 'object' ? Object.entries(pkg.exports).filter(([k, v]) => k.startsWith('.') && v !== null).map(([k]) => k) : [];
-  if (pkg.exports && !exportKeys.length && pkg.exports !== null && typeof pkg.exports !== 'object') exportKeys.push('.');
   const allDeps = { ...pkg.peerDependencies, ...pkg.optionalDependencies, ...pkg.devDependencies, ...pkg.dependencies };
   packages.push({
     name, dir: toPosix(dir), source,

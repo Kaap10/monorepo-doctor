@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Agent skill that audits JS/TS monorepos (Nx, Turborepo, workspaces) for boundary, cycle, caching, CI-coverage and prod-leakage problems.",
   "license": "MIT",
-  "engines": { "node": ">=22" },
+  "engines": { "node": ">=22.5" },
   "scripts": {
     "test": "node --test scripts/*.test.mjs",
     "check": "node scripts/check-skill.mjs"

@@ -96,7 +96,7 @@ for (const s of SEV) {
   md.push(`## ${s[0].toUpperCase() + s.slice(1)}`, '');
   for (const f of fs_) {
     const fence = fenceFor(f.evidence);
-    md.push(`### ${cell(f.title)}`, '', `- **id:** ${f.id ? `\`${f.id}\`` : '—'}`, `- **where:** ${loc(f.location)}`, '', '**Evidence**', '', fence, safe(f.evidence), fence, '', `**Fix:** ${f.fix}`, '');
+    md.push(`### ${cell(f.title)}`, '', `- **id:** ${f.id ? `\`${f.id}\`` : '—'}`, `- **where:** ${loc(f.location)}`, '', '**Evidence**', '', fence, safe(f.evidence), fence, '', `**Fix:** ${safe(f.fix) || '—'}`, '');
   }
 }
 if (!findings.length) md.push('No findings. 🎉', '');
