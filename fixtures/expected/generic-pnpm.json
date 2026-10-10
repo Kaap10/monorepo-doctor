@@ -1,0 +1,16 @@
+{
+  "fixture": "generic-pnpm",
+  "cleanPackages": ["@acme/clean"],
+  "mustFind": [
+    { "id": "circular-deps/package-cycle" },
+    { "id": "circular-deps/file-cycle", "package": "@acme/utils" },
+    { "id": "boundaries/deep-import", "package": "@acme/app" },
+    { "id": "ci-coverage/undeclared-workspace-dependency", "package": "@acme/utils" },
+    { "id": "ci-coverage/missing-test-script", "package": "@acme/app" },
+    { "id": "ci-coverage/tests-not-run-in-ci" },
+    { "id": "caching/uncached-root-script" },
+    { "id": "prod-leakage/test-files-in-package", "package": "@acme/ui" },
+    { "id": "prod-leakage/test-lib-in-dependencies", "package": "@acme/ui" },
+    { "id": "prod-leakage/build-tsconfig-includes-tests", "package": "@acme/ui" }
+  ]
+}
