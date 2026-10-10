@@ -1,0 +1,190 @@
+# monorepo-doctor
+
+An agent skill that audits JS/TS monorepos for the five problems teams keep missing.
+
+`monorepo-doctor` is a read-only AI agent skill for npm, yarn, pnpm, and bun workspaces, with deeper rules for Nx and Turborepo. It guides an agent through deterministic detection, source scanning, five independent audits, and an evidence-backed Markdown and JSON report.
+
+Requires Node ≥ 22.5.
+
+## What it checks
+
+| Check | What it looks for | Example finding ids |
+|---|---|---|
+| Package boundaries | Packages that are too large, import through another package's internals, skip declared workspace dependencies, or lack Nx/Turbo boundary enforcement. | `boundaries/deep-import`, `boundaries/nx-missing-module-boundaries-rule`, `boundaries/turbo-boundaries-violation` |
+| Circular dependencies | Package-level cycles and value-import file cycles that break topological builds, publishing, and ESM/CJS initialization. | `circular-deps/package-cycle`, `circular-deps/file-cycle` |
+| Task caching | Nx/Turbo cache configuration that can replay stale results or miss useful cache hits: missing outputs, undeclared env vars, volatile inputs, and dependency-blind test caches. | `caching/missing-outputs`, `caching/undeclared-env`, `caching/build-inputs-include-tests` |
+| CI test coverage | CI paths where tests silently do not run for changed code: no test command, shallow affected checkout, missing Nx base refs, or undeclared workspace dependencies. | `ci-coverage/tests-not-run-in-ci`, `ci-coverage/shallow-checkout-affected`, `ci-coverage/turbo-test-missing-dependson` |
+| Production leakage | Test files, fixtures, compiled test outputs, or test libraries that can ship in package tarballs or deployable build outputs. | `prod-leakage/test-files-in-package`, `prod-leakage/test-files-in-build-output`, `prod-leakage/test-lib-in-dependencies` |
+
+## Supported workspaces
+
+The skill supports JavaScript and TypeScript monorepos using npm, yarn, pnpm, or bun workspaces. It discovers packages from `package.json#workspaces` and `pnpm-workspace.yaml`, then scans source imports, package manifests, CI files, and build/test configuration.
+
+When Nx is present, it also reads `nx.json`, `project.json`, package `nx` targets, tags, target defaults, named inputs, and local Nx graph output when the local `nx` binary is installed. When Turborepo is present, it reads `turbo.json`, package-level Turbo overrides, dry-run metadata when local `turbo` is installed, and `turbo boundaries` output when available.
+
+## Install
+
+Install from the repository with:
+
+```bash
+npx skills add santoshyadavdev/monorepo-doctor
+```
+
+Manual installation is also supported. Copy `skills/monorepo-doctor` into one of these locations:
+
+- `~/.claude/skills/` for Claude Code
+- `~/.copilot/skills/` for Copilot CLI
+- `.github/skills/` inside a repository for repo-scoped use
+
+## Use
+
+Ask your agent to run the skill from the root of the monorepo you want audited:
+
+```text
+Run monorepo-doctor on this repo.
+```
+
+Scope the audit when you only need specific checks:
+
+```text
+Audit only caching and CI coverage with monorepo-doctor.
+```
+
+Use CI mode when the report should fail a run at a severity threshold:
+
+```text
+Run monorepo-doctor in CI mode, fail on high.
+```
+
+## Output
+
+The skill writes two report files in the workspace root or a user-specified output directory:
+
+- `monorepo-doctor-report.md` — human-readable audit report
+- `monorepo-doctor-report.json` — structured report with `summary`, per-check status, and full findings
+
+Severities follow the skill's rubric:
+
+| Severity | Meaning |
+|---|---|
+| `critical` | Wrong code can ship or tests are silently skipped for real changes |
+| `high` | Likely incorrect builds/caching or broken CI signal |
+| `medium` | Correctness risk under specific conditions, or a boundary erosion |
+| `low` | Hygiene, performance, or maintainability |
+
+A short Markdown excerpt looks like this:
+
+````markdown
+# Monorepo Doctor Report
+
+**Workspace:** pnpm · turbo · 8 packages
+
+**Summary:** 1 critical · 2 high · 1 medium · 1 low
+
+| Check | Status | Findings | Note |
+|---|---|---|---|
+| boundaries | ok | 1 |  |
+| circular-deps | ok | 0 |  |
+| caching | partial | 2 | turbo not installed; dry-run hash comparison skipped |
+| ci-coverage | ok | 1 |  |
+| prod-leakage | ok | 1 |  |
+
+## Critical
+
+### Publishable package @acme/ui includes test files
+
+- **id:** `prod-leakage/test-files-in-package`
+- **where:** `packages/ui/package.json` (@acme/ui)
+
+**Evidence**
+
+```
+npm pack --dry-run includes:
+src/button.spec.ts
+test/fixtures/button.json
+```
+
+**Fix:** Add `"files": ["dist"]` to package.json and exclude tests from the build tsconfig.
+````
+
+## Guarantees
+
+`monorepo-doctor` is read-only. It must not install dependencies, build, run tests, or edit project files. The only allowed writes are `monorepo-doctor-report.md`, `monorepo-doctor-report.json`, and the skill work directory `$W`, where `$W` is `$(node -p 'require("os").tmpdir()')/monorepo-doctor`.
+
+The skill may run the Node snippets in `skills/monorepo-doctor/references`, `npm pack --dry-run --json --ignore-scripts`, `npx --yes knip`, and `npx --yes publint`. It may run `npx nx` or `npx turbo` only when detection finds a local `node_modules/.bin/nx` or `node_modules/.bin/turbo`; those commands are limited to graph, dry-run JSON, and boundaries inspection, never real task execution.
+
+Without `node_modules`, dependency-resolution checks such as `knip` and `publint` are skipped or marked `partial`. Without a local Nx or Turborepo binary, the skill still performs static config analysis, but graph refreshes, Turbo dry-run hash comparisons, and `turbo boundaries` are skipped or marked `partial`.
+
+## CI example
+
+This example runs the skill in a GitHub Actions job and uploads both reports. Replace the agent command with the non-interactive CLI for your environment.
+
+```yaml
+name: monorepo-doctor
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.5'
+
+      - name: Run monorepo-doctor (adapt to your agent)
+        run: |
+          copilot --non-interactive "Run monorepo-doctor in CI mode, fail on high. Write reports to $PWD."
+
+      - name: Upload monorepo-doctor report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monorepo-doctor-report
+          path: |
+            monorepo-doctor-report.md
+            monorepo-doctor-report.json
+```
+
+## Prior art
+
+`monorepo-doctor` builds on existing ecosystem tools and agent references rather than replacing them:
+
+- [nrwl/nx-ai-agents-config](https://github.com/nrwl/nx-ai-agents-config) provides Nx-focused agent skills for Nx workspaces and cache investigation.
+- [Turborepo's agent skill](https://github.com/vercel/turborepo/tree/main/skills/turborepo) points agents at Turborepo documentation and conventions.
+- [madge](https://github.com/pahen/madge) and [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) analyze dependency graphs and cycles.
+- [knip](https://github.com/webpro-nl/knip) finds unused and unlisted dependencies.
+- [publint](https://github.com/bluwy/publint) validates package publishing metadata.
+- [`@nx/enforce-module-boundaries`](https://nx.dev/features/enforce-module-boundaries) enforces Nx project dependency constraints.
+- [`turbo boundaries`](https://turborepo.com/docs/crafting-your-repository/structuring-a-repository#configuring-boundaries) checks Turborepo package boundaries.
+
+What this skill adds is one read-only audit flow across all five concerns, with consistent finding ids, evidence requirements, severity rules, Markdown/JSON output, and CI-friendly failure thresholds.
+
+## Development
+
+Run the tooling with Node ≥ 22.5:
+
+```bash
+npm test
+npm run check
+```
+
+Fixtures live under `fixtures/` and describe seeded monorepo problems for generic pnpm, Nx, and Turborepo workspaces. Expected findings live in `fixtures/expected/*.json`.
+
+Use `scripts/verify-fixture.mjs` to compare a generated report with an expected fixture contract:
+
+```bash
+node scripts/verify-fixture.mjs monorepo-doctor-report.json fixtures/expected/generic-pnpm.json
+```
+
+`npm run check` validates the skill frontmatter, reference links, and finding-id coverage. It should print:
+
+```text
+✓ skill is consistent
+```
