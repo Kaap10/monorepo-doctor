@@ -1,0 +1,6 @@
+{
+  "name": "nx-fixture",
+  "private": true,
+  "workspaces": ["libs/*"],
+  "devDependencies": { "nx": "21.0.0" }
+}

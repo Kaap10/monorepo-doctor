@@ -1,0 +1,9 @@
+{
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*"]
+  },
+  "targetDefaults": {
+    "build": { "cache": true, "dependsOn": ["^build"] },
+    "test": { "cache": true, "inputs": ["default"] }
+  }
+}

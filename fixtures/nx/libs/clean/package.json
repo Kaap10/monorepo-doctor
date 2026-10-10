@@ -1,0 +1,5 @@
+{
+  "name": "@nxf/clean",
+  "private": true,
+  "scripts": { "test": "vitest run" }
+}

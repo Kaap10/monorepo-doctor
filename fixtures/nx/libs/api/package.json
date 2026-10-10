@@ -1,0 +1,8 @@
+{
+  "name": "@nxf/api",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.lib.json",
+    "test": "vitest run"
+  }
+}
