@@ -11,7 +11,7 @@ export function verify(report, expected) {
   for (const k of REPORT_KEYS) if (!(k in report)) schemaErrors.push(`report missing "${k}"`);
   for (const f of findings) {
     for (const k of FINDING_KEYS) if (!(k in f)) schemaErrors.push(`finding ${f.id ?? '?'} missing "${k}"`);
-    if (!(f.severity in RANK)) schemaErrors.push(`finding ${f.id ?? '?'} has invalid severity "${f.severity}"`);
+    if (typeof f.severity !== 'string' || !Object.hasOwn(RANK, f.severity)) schemaErrors.push(`finding ${f.id ?? '?'} has invalid severity "${f.severity}"`);
   }
   if (report.summary) {
     for (const s of Object.keys(RANK)) {

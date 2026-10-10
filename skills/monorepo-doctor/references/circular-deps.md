@@ -15,11 +15,13 @@ File cycles cause `undefined` at import time in ESM/CJS and block tree-shaking.
 1. If Nx is installed, refresh the graph and use it as the package graph:
    ```bash
    W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
-   NX_DAEMON=false NX_NO_CLOUD=true NX_WORKSPACE_DATA_DIRECTORY="$W/nx-data" npx nx graph --file="$W/nx-graph.json"
+   rm -f "$W/nx-graph.json" "$W/nx-graph.failed"
+   NX_DAEMON=false NX_NO_CLOUD=true NX_WORKSPACE_DATA_DIRECTORY="$W/nx-data" npx nx graph --file="$W/nx-graph.json" \
+     || touch "$W/nx-graph.failed"
    ```
    The file has `graph.dependencies[project] = [{ target }]`. Otherwise use `workspace.json` `workspaceDeps`.
    If Turborepo is installed, `TURBO_TELEMETRY_DISABLED=1 npx turbo run build --dry=json` failing with a message containing `cyclic` is also evidence. Turbo dry-run JSON writes no project files beyond Turborepo's own cache directory.
-   Status: the `workspaceDeps` graph is complete for package.json-based workspaces, so missing turbo does **not** make this check partial. Under Nx without a local install, mark `partial` with reason `nx not installed; project graph inferred from package.json only` (Nx also infers edges from imports and `implicitDependencies`).
+   Status: the `workspaceDeps` graph is complete for package.json-based workspaces, so missing turbo does **not** make this check partial. Under Nx without a local install, mark `partial` with reason `nx not installed; project graph inferred from package.json only`; if Nx is installed but `nx graph` fails, mark `partial` with reason `nx graph failed; project graph inferred from package.json only` (Nx also infers edges from imports and `implicitDependencies`).
 2. Run the cycle snippet:
 
 ```bash
@@ -86,9 +88,12 @@ for (const [pkg, edges] of Object.entries(scan.fileEdges)) {
   }
 }
 const nx = ws.orchestrators.find((o) => o.name === 'nx');
-const status = nx && !nx.installed && !fs.existsSync(nxGraphPath) ? 'partial' : 'ok';
+const graphFailed = Boolean(nx?.installed) && (fs.existsSync(path.join(work, 'nx-graph.failed')) || !fs.existsSync(nxGraphPath));
+const status = nx && (graphFailed || !fs.existsSync(nxGraphPath)) ? 'partial' : 'ok';
 const result = { status, findings };
-if (status === 'partial') result.reason = 'nx not installed; project graph inferred from package.json only';
+if (status === 'partial') result.reason = graphFailed
+  ? 'nx graph failed; project graph inferred from package.json only'
+  : 'nx not installed; project graph inferred from package.json only';
 fs.writeFileSync(path.join(work, 'findings', 'circular-deps.json'), JSON.stringify(result, null, 2));
 console.log(JSON.stringify({ packageCycles: findings.filter((f) => f.id.endsWith('package-cycle')).length, fileCycles: findings.filter((f) => f.id.endsWith('file-cycle')).length }));
 EOF

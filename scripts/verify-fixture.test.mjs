@@ -51,3 +51,9 @@ test('schema errors: missing keys, bad severity, summary mismatch', () => {
   assert.ok(r.schemaErrors.some((e) => e.includes('missing "fix"')));
   assert.ok(r.schemaErrors.some((e) => e.includes('summary')));
 });
+
+test('inherited property names are not valid severities', () => {
+  const f = finding('circular-deps/package-cycle', 'toString');
+  const r = verify({ version: 1, workspace: {}, summary: { critical: 0, high: 0, medium: 0, low: 0 }, checks: [], findings: [f] }, { cleanPackages: [], mustFind: [] });
+  assert.ok(r.schemaErrors.some((e) => e.includes('invalid severity "toString"')));
+});

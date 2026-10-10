@@ -35,7 +35,8 @@ export function checkSkill(skillDir, expectedDir) {
   for (const l of linked) if (!refs.includes(l)) errors.push(`SKILL.md links missing file references/${l}`);
   for (const r of refs) if (!linked.has(r)) errors.push(`references/${r} is not linked from SKILL.md`);
   const corpus = refs.map((r) => fs.readFileSync(path.join(refDir, r), 'utf8')).join('\n');
-  if (expectedDir && fs.existsSync(expectedDir)) {
+  if (expectedDir && !fs.existsSync(expectedDir)) errors.push(`expected dir not found: ${expectedDir}`);
+  else if (expectedDir) {
     for (const f of fs.readdirSync(expectedDir).filter((x) => x.endsWith('.json'))) {
       const exp = JSON.parse(fs.readFileSync(path.join(expectedDir, f), 'utf8'));
       for (const { id } of exp.mustFind) {

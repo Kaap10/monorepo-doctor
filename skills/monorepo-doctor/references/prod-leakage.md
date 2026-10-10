@@ -31,7 +31,7 @@ Test libraries: `vitest`, `jest`, `@jest/*`, `mocha`, `chai`, `sinon`, `@testing
 5. If `hasNodeModules`, for each publishable package that has its build output present:
    ```bash
    W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
-   npm_config_ignore_scripts=true npx --yes publint "<pkg-dir>" 2>&1
+   npm_config_ignore_scripts=true npx --yes publint@0.3.25 "<pkg-dir>" 2>&1
    ```
    publint prints sections `Errors:`, `Warnings:`, `Suggestions:` followed by numbered messages. One finding per message. Skip when `node_modules` is missing. Skip unbuilt packages and set status `partial` with reason `publint skipped for unbuilt packages: …`.
 6. Write `findings/prod-leakage.json`.

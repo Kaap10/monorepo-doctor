@@ -59,6 +59,12 @@ test('unlinked and missing references are reported', () => {
   assert.ok(errors.some((e) => e.includes('references/a.md is not linked')));
 });
 
+test('missing expected dir is an error when supplied', () => {
+  const { dir } = makeSkill();
+  assert.deepEqual(checkSkill(dir), []);
+  assert.ok(checkSkill(dir, path.join(os.tmpdir(), 'mrd-no-such-dir')).some((e) => e.includes('expected dir not found')));
+});
+
 test('expected finding ids must be defined in a reference', () => {
   const { dir, expDir } = makeSkill({ expected: { mustFind: [{ id: 'nope/missing' }], cleanPackages: [] } });
   assert.ok(checkSkill(dir, expDir).some((e) => e.includes('nope/missing')));
