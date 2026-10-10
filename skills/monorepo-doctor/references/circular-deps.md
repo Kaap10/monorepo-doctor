@@ -19,6 +19,7 @@ File cycles cause `undefined` at import time in ESM/CJS and block tree-shaking.
    ```
    The file has `graph.dependencies[project] = [{ target }]`. Otherwise use `workspace.json` `workspaceDeps`.
    If Turborepo is installed, `npx turbo run build --dry=json` failing with a message containing `cyclic` is also evidence.
+   Status: the `workspaceDeps` graph is complete for package.json-based workspaces, so missing turbo does **not** make this check partial. Under Nx without a local install, mark `partial` with reason `nx not installed; project graph inferred from package.json only` (Nx also infers edges from imports and `implicitDependencies`).
 2. Run the cycle snippet:
 
 ```bash

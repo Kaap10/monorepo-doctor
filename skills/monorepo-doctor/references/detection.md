@@ -3,7 +3,7 @@
 Goal: build an inventory at `$W/workspace.json`. Every later phase reads it.
 
 Requires Node ≥ 22.5 because this phase uses `path.matchesGlob`.
-This phase resets the work directory. In every shell, start with `W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"`; all later phases reuse `$W`, and you should recompute it in each new shell.
+This phase resets the work directory. In every shell, start with `W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"`; all later phases reuse `$W`, and you should recompute it in each new shell. `os.tmpdir()` honors `TMPDIR`: if the default temp dir is not writable in your environment, `export TMPDIR=<writable dir outside the audited repo>` in every shell before computing `$W`, so the shell and the Node snippets agree.
 
 Run from the workspace root (the directory the user pointed at; default: current directory):
 

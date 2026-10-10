@@ -103,7 +103,7 @@ if (!findings.length) md.push('No findings. 🎉', '');
 fs.writeFileSync(path.join(outDir, 'monorepo-doctor-report.md'), md.join('\n'));
 console.log(JSON.stringify({ outDir, summary }));
 EOF
-node "$W/render.mjs" "<output-dir>"
+node "$W/render.mjs" "<output-dir>"   # replace <output-dir> with a literal path; omit it to write to the workspace root
 ```
 
 ## CI mode
