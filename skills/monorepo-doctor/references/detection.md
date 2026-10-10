@@ -2,7 +2,7 @@
 
 Goal: build an inventory at `$W/workspace.json`. Every later phase reads it.
 
-Requires Node ≥ 22.5 because this phase uses `path.matchesGlob`.
+Requires Node ≥ 22.5 because this phase uses `fs.globSync` and `path.matchesGlob`. The snippet below exits 2 with `monorepo-doctor requires Node >= 22.5` when either API is missing.
 This phase resets the work directory. In every shell, start with `W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"`; all later phases reuse `$W`, and you should recompute it in each new shell. `os.tmpdir()` honors `TMPDIR`: if the default temp dir is not writable in your environment, `export TMPDIR=<writable dir outside the audited repo>` in every shell before computing `$W`, so the shell and the Node snippets agree.
 
 Run from the workspace root (the directory the user pointed at; default: current directory):
@@ -14,6 +14,10 @@ cat > "$W/detect.mjs" <<'EOF'
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+if (typeof fs.globSync !== 'function' || typeof path.matchesGlob !== 'function') {
+  console.error('monorepo-doctor requires Node >= 22.5');
+  process.exit(2);
+}
 const root = path.resolve(process.argv[2] ?? '.');
 const work = path.join(os.tmpdir(), 'monorepo-doctor');
 fs.rmSync(work, { recursive: true, force: true });
@@ -82,22 +86,23 @@ const include = globs.filter((g) => !g.startsWith('!'));
 const exclude = globs.filter((g) => g.startsWith('!')).map((g) => g.slice(1).replace(/\/$/, ''));
 const isExcluded = (dir) => exclude.some((g) => path.matchesGlob(dir, g) || path.matchesGlob(`${dir}/package.json`, `${g}/package.json`));
 
+const SKIP_NAMES = new Set(['node_modules', 'dist', 'build', '.git', '.nx', '.turbo', 'coverage']);
+const hasSkippedPart = (p) => p.split('/').some((part) => SKIP_NAMES.has(part));
+const prune = (p) => SKIP_NAMES.has(path.basename(String(p)));
+
 const orchestrators = [];
 if (exists('nx.json')) orchestrators.push({ name: 'nx', installed: exists('node_modules/.bin/nx') });
 if (exists('turbo.json')) orchestrators.push({ name: 'turbo', installed: exists('node_modules/.bin/turbo') });
 
-const SKIP_NAMES = new Set(['node_modules', 'dist', 'build', '.git', '.nx', '.turbo', 'coverage']);
-const hasSkippedPart = (p) => p.split('/').some((part) => SKIP_NAMES.has(part));
 const dirs = new Map();
 for (const g of include) {
-  for (const raw of fs.globSync(`${g.replace(/\/$/, '')}/package.json`, { cwd: root })) {
+  for (const raw of fs.globSync(`${g.replace(/\/$/, '')}/package.json`, { cwd: root, exclude: prune })) {
     const m = toPosix(raw);
     const d = path.posix.dirname(m);
     if (!hasSkippedPart(m) && !isExcluded(d)) dirs.set(d, 'package.json');
   }
 }
 if (orchestrators.some((o) => o.name === 'nx')) {
-  const prune = (p) => SKIP_NAMES.has(path.basename(String(p)));
   for (const raw of fs.globSync('**/project.json', { cwd: root, exclude: prune })) {
     const m = toPosix(raw);
     if (hasSkippedPart(m)) continue;
@@ -131,8 +136,9 @@ for (const p of packages) {
 }
 
 const ci = [
-  ...fs.globSync('.github/workflows/*.{yml,yaml}', { cwd: root }).map(toPosix),
-  ...['.gitlab-ci.yml', 'azure-pipelines.yml', '.circleci/config.yml', 'bitbucket-pipelines.yml'].filter(exists),
+  ...fs.globSync('.github/workflows/*.{yml,yaml}', { cwd: root, exclude: prune }).map(toPosix),
+  ...fs.globSync('.buildkite/*.{yml,yaml}', { cwd: root, exclude: prune }).map(toPosix),
+  ...['.gitlab-ci.yml', 'azure-pipelines.yml', '.circleci/config.yml', 'bitbucket-pipelines.yml', 'Jenkinsfile', '.travis.yml'].filter(exists),
 ];
 
 const ws = {
@@ -156,3 +162,4 @@ node "$W/detect.mjs" "<workspace-root>"
 - `hasNodeModules: false`: skip `knip` and any step that needs resolved dependencies; mark `partial`.
 - `packages[].source === "project.json"`: an Nx project without its own package.json — package.json-based rules (missing test script, undeclared dependency, npm pack) do not apply to it.
 - Print a one-line summary of the inventory to the user before continuing.
+- `ciFiles` contains the top-level CI files for GitHub Actions, GitLab CI, Azure Pipelines, CircleCI, Bitbucket Pipelines, Jenkins, Buildkite, and Travis. The CI coverage check follows local GitLab `include:` entries and local GitHub reusable workflows referenced from these files.

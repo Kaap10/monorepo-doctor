@@ -8,7 +8,7 @@ Inputs: `workspace.json`, `scan.json`. Output: `findings/boundaries.json`.
 | id | severity | detect | evidence |
 |---|---|---|---|
 | `boundaries/oversized-package` | low | `scan.packages[p].sourceFiles > 500` or `loc > 50000` | counts |
-| `boundaries/deep-import` | medium | each `scan.imports` entry with `deep && declared` (undeclared ones are reported by ci-coverage instead) | file:line + import specifier + target's `exports` keys |
+| `boundaries/deep-import` | medium | each `scan.imports` entry with `deep && (declared || importer.source === "project.json")` (undeclared package.json importers are reported by ci-coverage instead) | file:line + import specifier + target's `exports` keys |
 | `boundaries/unlisted-dependency` | medium | knip `unlisted` entries | knip output line |
 | `boundaries/unused-dependency` | low | knip `dependencies` / `devDependencies` entries | knip output line |
 | `boundaries/nx-missing-module-boundaries-rule` | medium | Nx detected and no ESLint config in the root mentions `@nx/enforce-module-boundaries` | list of ESLint config files checked |
@@ -27,11 +27,11 @@ Group `deep-import` findings: one finding per (from, target) pair, listing up to
    npx --yes knip --reporter json --include dependencies,unlisted --no-progress --no-exit-code
    ```
    Parse stdout as JSON. Its shape varies by version; look for per-file `dependencies`, `devDependencies` and `unlisted` arrays of `{ name }`. Map the file to its package via `workspace.json`. If knip fails or the output can't be parsed, mark the check `partial` with reason `knip unavailable: <first line of error>`. Do **not** report `unused-dependency` for `@types/*` packages or for tools only referenced in scripts.
-3. **Nx** — only if Nx is an orchestrator: read ESLint configs in the root (`eslint.config.{js,mjs,cjs,ts}`, `.eslintrc{,.json,.js,.cjs}`) and every package dir. Apply the three `nx-*` rules. A config that contains the rule name anywhere counts as present.
+3. **Nx** — only if Nx is an orchestrator: read ESLint configs in the root (`eslint.config.{js,mjs,cjs,ts}`, `.eslintrc{,.json,.js,.cjs}`) and every package dir. Apply the three `nx-*` rules. A config that contains `@nx/enforce-module-boundaries` or legacy `@nrwl/nx/enforce-module-boundaries` anywhere counts as present. Group `nx-untagged-project` consistently as one finding per untagged project found from the root and package-dir project configs.
 4. **Turborepo** — only if turbo is an orchestrator **and installed**:
    ```bash
    W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
-   npx turbo boundaries
+   TURBO_TELEMETRY_DISABLED=1 npx turbo boundaries
    ```
    One finding per reported violation. If the command errors with an unknown-command message (turbo < 2.4), skip this sub-step and note it in `reason`.
 5. Write `findings/boundaries.json`.

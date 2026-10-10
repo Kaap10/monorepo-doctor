@@ -7,11 +7,11 @@ Reads `workspace.json`, walks every package's source files, and writes `$W/scan.
 | `packages[name]` | `{ sourceFiles, testFiles: [file], loc }` |
 | `imports` | every import that crosses a package boundary: `{ from, target, kind, spec, subpath, file, line, isTest, declared, deep }` |
 | `fileEdges[name]` | intra-package `[fromFile, toFile]` edges from value imports (type-only imports excluded) |
-| `env` | `{ package, file, line, name }` for `process.env.X`, `process.env['X']`, `import.meta.env.X` |
+| `env` | `{ package, file, line, name, isTest }` for `process.env.X`, `process.env['X']`, `import.meta.env.X` |
 
 `kind`: `relative` (`../../other-pkg/src/x`), `package` (`@scope/pkg/sub`), `alias` (tsconfig `paths`).
 `declared`: the importing package lists the target in any dependency field.
-`deep`: the import bypasses the target's public API — any `relative` cross-package import, a package subpath starting with `src/`, `lib/` or `internal/`, or a subpath not covered by the target's `exports` keys. Alias imports are resolved to the target package first; aliases to the target entry point stay non-deep, while aliases to any non-entry file are deep.
+`deep`: the import bypasses the target's public API — any `relative` cross-package import, a package subpath starting with `src/`, `lib/` or `internal/`, or a `src`/`lib`/`internal` package subpath when the target has no `exports`, or any subpath not covered by the target's `exports` keys. Alias imports are resolved to the target package first; aliases to the target entry point stay non-deep, while aliases to any non-entry file are deep.
 
 ```bash
 W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
@@ -138,7 +138,7 @@ for (const pkg of ws.packages) {
     }
     for (const m of text.matchAll(/\b(?:import|require)\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g)) specs.push({ spec: m[1], line: lineAt(starts, m.index) });
     for (const m of text.matchAll(/\bprocess\.env\.([A-Za-z_][\w]*)|\bprocess\.env\[\s*['"]([^'"]+)['"]\s*\]|\bimport\.meta\.env\.([A-Za-z_][\w]*)/g)) {
-      scan.env.push({ package: pkg.name, file, line: lineAt(starts, m.index), name: m[1] ?? m[2] ?? m[3] });
+      scan.env.push({ package: pkg.name, file, line: lineAt(starts, m.index), name: m[1] ?? m[2] ?? m[3], isTest });
     }
     for (const { spec, line } of specs) {
       let kind, target, subpath = '', resolved = null;
@@ -166,9 +166,10 @@ for (const pkg of ws.packages) {
       }
       const tp = byName.get(target);
       const entry = isEntrySubpath(tp, subpath);
+      const hasExports = exportEntries(tp).length > 0;
       const deep = kind === 'relative'
         || (kind === 'alias' ? !entry
-          : (/^(src|lib|internal)(\/|$)/.test(subpath) || (subpath !== '' && !covered(tp, subpath))));
+          : (subpath !== '' && (hasExports ? !covered(tp, subpath) : /^(src|lib|internal)(\/|$)/.test(subpath))));
       scan.imports.push({ from: pkg.name, target, kind, spec, subpath, file, line, isTest, declared: pkg.workspaceDeps.includes(target), deep });
     }
   }
@@ -190,5 +191,7 @@ node "$W/scan.mjs"
 Notes for the agent:
 - The scan is regex-based. Commented-out imports can produce false positives — open the file at `line` to confirm before reporting.
 - Type-only imports (`import type …`, `export type … from`, and imports whose named specifiers are all `type X`) are excluded because they are erased at compile time.
+- `.vue`, `.svelte`, and `.astro` files are not scanned.
+- Same-package aliases such as `@/x` produce no file edges; package-boundary checks are unaffected.
 - Environment reads using destructuring, such as `const { API_URL } = process.env`, are not detected.
 - Huge repos: the scan is linear in file count and import/env match count, with line numbers resolved by precomputed offsets; if it takes > 2 minutes, tell the user and proceed.
