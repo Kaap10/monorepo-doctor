@@ -21,7 +21,7 @@ where `<check>` is one of `boundaries`, `circular-deps`, `caching`, `ci-coverage
 ```
 
 - `ok`: check ran fully. `partial`: some sub-steps skipped (say which in `reason`).
-  `skipped`: check could not run at all. `not-run`: user scoped it out.
+  `skipped`: check could not run at all. `not-run`: user scoped it out. A missing findings file is rendered as `skipped` with reason `no findings file`; for user-scoped-out checks, write an explicit `not-run` file at `$W/findings/<check>.json`.
 - `location.file` is relative to the workspace root. Include `package` whenever the finding belongs to one package.
 - Never emit a finding without `evidence`. If you are unsure, lower severity and say so in `evidence`; do not guess.
 - Use only the ids defined in the check reference files.
@@ -39,7 +39,7 @@ Severity may be lowered one level with a stated reason (e.g., package is private
 
 ## Render
 
-After all checks, run this snippet. Arguments: output directory (default: workspace root).
+After all checks, run this snippet. It validates every findings file and fails loudly (`stderr`, exit 1) if a status is outside the enum, `reason` is missing for a non-`ok` status, a finding id does not start with `<check>/`, or evidence is missing/empty. Arguments: output directory (default: workspace root).
 
 ```bash
 W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
@@ -52,20 +52,32 @@ const ws = JSON.parse(fs.readFileSync(path.join(work, 'workspace.json'), 'utf8')
 const outDir = path.resolve(process.argv[2] ?? ws.root);
 fs.mkdirSync(outDir, { recursive: true });
 const CHECKS = ['boundaries', 'circular-deps', 'caching', 'ci-coverage', 'prod-leakage'];
+const STATUS = ['ok', 'partial', 'skipped', 'not-run'];
 const SEV = ['critical', 'high', 'medium', 'low'];
-const checks = [], findings = [];
+const checks = [], findings = [], problems = [];
 for (const check of CHECKS) {
   const p = path.join(work, 'findings', `${check}.json`);
-  const r = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : { status: 'not-run', reason: 'no findings file', findings: [] };
-  const list = Array.isArray(r.findings) ? r.findings : [];
+  let r;
+  if (fs.existsSync(p)) {
+    try { r = JSON.parse(fs.readFileSync(p, 'utf8')); }
+    catch (e) { problems.push(`${check}: invalid JSON: ${e.message}`); r = { status: 'skipped', reason: 'invalid findings file', findings: [] }; }
+  } else {
+    r = { status: 'skipped', reason: 'no findings file', findings: [] };
+  }
+  if (!STATUS.includes(r.status)) problems.push(`${check}: invalid status ${JSON.stringify(r.status)}`);
+  if (r.status !== 'ok' && !String(r.reason ?? '').trim()) problems.push(`${check}: reason is required when status is ${r.status}`);
+  const list = Array.isArray(r.findings) ? r.findings : (problems.push(`${check}: findings must be an array`), []);
   checks.push({ check, status: r.status, reason: r.reason, findingCount: list.length });
   for (const f of list) {
-    if (!SEV.includes(f.severity)) {
-      console.error(`ERROR: unknown severity "${f.severity}" in ${check}${f.id ? ` (${f.id})` : ''}`);
-      process.exit(1);
-    }
+    if (!SEV.includes(f.severity)) problems.push(`${check}: unknown severity ${JSON.stringify(f.severity)}${f.id ? ` (${f.id})` : ''}`);
+    if (typeof f.id !== 'string' || !f.id.startsWith(`${check}/`)) problems.push(`${check}: finding id must start with ${check}/ (${f.id ?? 'missing'})`);
+    if (!String(f.evidence ?? '').trim()) problems.push(`${check}: finding ${f.id ?? '?'} missing evidence`);
     findings.push({ ...f, check });
   }
+}
+if (problems.length) {
+  for (const problem of problems) console.error(`ERROR: ${problem}`);
+  process.exit(1);
 }
 const safe = (s) => String(s ?? '');
 findings.sort((a, b) => SEV.indexOf(a.severity) - SEV.indexOf(b.severity)
@@ -108,7 +120,7 @@ node "$W/render.mjs" "<output-dir>"   # replace <output-dir> with a literal path
 
 ## CI mode
 
-When the user asks for CI mode (or a fail threshold), after rendering run:
+When the user asks for CI mode (or a fail threshold), write the reports first. In hosted CI, the agent step itself may not be able to fail the job reliably, so document/run this threshold check as a separate workflow step against the report file:
 
 ```bash
 node -e '
