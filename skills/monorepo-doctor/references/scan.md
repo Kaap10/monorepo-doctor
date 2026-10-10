@@ -139,7 +139,7 @@ for (const pkg of ws.packages) {
     }
     for (const m of text.matchAll(/\b(?:import|require)\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g)) {
       const line = lineAt(starts, m.index);
-      if (/\bimport\s+type\s+[\w$]+\s*=\s*$/.test(text.slice(starts[line - 1], m.index))) continue;
+      if (/\bimport\s+type\s+[\w$]+\s*=\s*$/.test(text.slice(Math.max(0, m.index - 200), m.index))) continue;
       specs.push({ spec: m[1], line });
     }
     for (const m of text.matchAll(/\bprocess\.env\.([A-Za-z_][\w]*)|\bprocess\.env\[\s*['"]([^'"]+)['"]\s*\]|\bimport\.meta\.env\.([A-Za-z_][\w]*)/g)) {

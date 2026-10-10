@@ -55,8 +55,11 @@ function cycles(graph) {
   return [...found.values()];
 }
 
+const nx = ws.orchestrators.find((o) => o.name === 'nx');
+const graphFailed = Boolean(nx?.installed) && (fs.existsSync(path.join(work, 'nx-graph.failed')) || !fs.existsSync(nxGraphPath));
+const useNxGraph = Boolean(nx?.installed) && !graphFailed;
 let pkgGraph;
-if (fs.existsSync(nxGraphPath)) {
+if (useNxGraph) {
   const g = JSON.parse(fs.readFileSync(nxGraphPath, 'utf8')).graph;
   pkgGraph = new Map(Object.entries(g.dependencies).map(([k, v]) => [k, v.map((d) => d.target).filter((t) => g.nodes[t])]));
 } else {
@@ -87,9 +90,7 @@ for (const [pkg, edges] of Object.entries(scan.fileEdges)) {
     });
   }
 }
-const nx = ws.orchestrators.find((o) => o.name === 'nx');
-const graphFailed = Boolean(nx?.installed) && (fs.existsSync(path.join(work, 'nx-graph.failed')) || !fs.existsSync(nxGraphPath));
-const status = nx && (graphFailed || !fs.existsSync(nxGraphPath)) ? 'partial' : 'ok';
+const status = nx && !useNxGraph ? 'partial' : 'ok';
 const result = { status, findings };
 if (status === 'partial') result.reason = graphFailed
   ? 'nx graph failed; project graph inferred from package.json only'
