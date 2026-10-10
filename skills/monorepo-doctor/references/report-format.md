@@ -1,6 +1,6 @@
 # Report format
 
-Every check writes one file: `$TMPDIR/monorepo-doctor/findings/<check>.json`
+Every check writes one file: `$W/findings/<check>.json`
 where `<check>` is one of `boundaries`, `circular-deps`, `caching`, `ci-coverage`, `prod-leakage`.
 
 ```json
@@ -42,23 +42,36 @@ Severity may be lowered one level with a stated reason (e.g., package is private
 After all checks, run this snippet. Arguments: output directory (default: workspace root).
 
 ```bash
-cat > "${TMPDIR:-/tmp}/monorepo-doctor/render.mjs" <<'EOF'
+W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
+cat > "$W/render.mjs" <<'EOF'
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 const work = path.join(os.tmpdir(), 'monorepo-doctor');
 const ws = JSON.parse(fs.readFileSync(path.join(work, 'workspace.json'), 'utf8'));
 const outDir = path.resolve(process.argv[2] ?? ws.root);
+fs.mkdirSync(outDir, { recursive: true });
 const CHECKS = ['boundaries', 'circular-deps', 'caching', 'ci-coverage', 'prod-leakage'];
 const SEV = ['critical', 'high', 'medium', 'low'];
 const checks = [], findings = [];
 for (const check of CHECKS) {
   const p = path.join(work, 'findings', `${check}.json`);
   const r = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : { status: 'not-run', reason: 'no findings file', findings: [] };
-  checks.push({ check, status: r.status, reason: r.reason, findingCount: r.findings.length });
-  for (const f of r.findings) findings.push({ ...f, check });
+  const list = Array.isArray(r.findings) ? r.findings : [];
+  checks.push({ check, status: r.status, reason: r.reason, findingCount: list.length });
+  for (const f of list) {
+    if (!SEV.includes(f.severity)) {
+      console.error(`ERROR: unknown severity "${f.severity}" in ${check}${f.id ? ` (${f.id})` : ''}`);
+      process.exit(1);
+    }
+    findings.push({ ...f, check });
+  }
 }
-findings.sort((a, b) => SEV.indexOf(a.severity) - SEV.indexOf(b.severity) || a.id.localeCompare(b.id));
+const safe = (s) => String(s ?? '');
+findings.sort((a, b) => SEV.indexOf(a.severity) - SEV.indexOf(b.severity)
+  || safe(a.id).localeCompare(safe(b.id))
+  || safe(a.location?.file).localeCompare(safe(b.location?.file))
+  || ((a.location?.line ?? 0) - (b.location?.line ?? 0)));
 const summary = Object.fromEntries(SEV.map((s) => [s, findings.filter((f) => f.severity === s).length]));
 const report = {
   version: 1,
@@ -67,27 +80,30 @@ const report = {
   summary, checks, findings,
 };
 fs.writeFileSync(path.join(outDir, 'monorepo-doctor-report.json'), JSON.stringify(report, null, 2) + '\n');
-const loc = (l) => `\`${l.file}${l.line ? `:${l.line}` : ''}\`${l.package ? ` (${l.package})` : ''}`;
+const cell = (v) => safe(v).replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
+const loc = (l) => l?.file ? `\`${l.file}${l.line ? `:${l.line}` : ''}\`${l.package ? ` (${l.package})` : ''}` : '—';
+const fenceFor = (s) => '`'.repeat(Math.max(3, ...[...safe(s).matchAll(/`+/g)].map((m) => m[0].length + 1)));
 const md = [
   '# Monorepo Doctor Report', '',
   `**Workspace:** ${ws.packageManager} · ${ws.orchestrators.map((o) => o.name).join(', ') || 'no orchestrator'} · ${ws.packages.length} packages`, '',
   `**Summary:** ${SEV.map((s) => `${summary[s]} ${s}`).join(' · ')}`, '',
   '| Check | Status | Findings | Note |', '|---|---|---|---|',
-  ...checks.map((c) => `| ${c.check} | ${c.status} | ${c.findingCount} | ${c.reason ?? ''} |`), '',
+  ...checks.map((c) => `| ${cell(c.check)} | ${cell(c.status)} | ${c.findingCount} | ${cell(c.reason ?? '')} |`), '',
 ];
 for (const s of SEV) {
   const fs_ = findings.filter((f) => f.severity === s);
   if (!fs_.length) continue;
   md.push(`## ${s[0].toUpperCase() + s.slice(1)}`, '');
   for (const f of fs_) {
-    md.push(`### ${f.title}`, '', `- **id:** \`${f.id}\``, `- **where:** ${loc(f.location)}`, '', '**Evidence**', '', '```', f.evidence, '```', '', `**Fix:** ${f.fix}`, '');
+    const fence = fenceFor(f.evidence);
+    md.push(`### ${cell(f.title)}`, '', `- **id:** ${f.id ? `\`${f.id}\`` : '—'}`, `- **where:** ${loc(f.location)}`, '', '**Evidence**', '', fence, safe(f.evidence), fence, '', `**Fix:** ${f.fix}`, '');
   }
 }
 if (!findings.length) md.push('No findings. 🎉', '');
 fs.writeFileSync(path.join(outDir, 'monorepo-doctor-report.md'), md.join('\n'));
 console.log(JSON.stringify({ outDir, summary }));
 EOF
-node "${TMPDIR:-/tmp}/monorepo-doctor/render.mjs" "<output-dir>"
+node "$W/render.mjs" "<output-dir>"
 ```
 
 ## CI mode
@@ -96,11 +112,19 @@ When the user asks for CI mode (or a fail threshold), after rendering run:
 
 ```bash
 node -e '
-const r = require(process.argv[1]);
-const order = ["low","medium","high","critical"];
-const min = order.indexOf(process.argv[2] || "high");
-const bad = r.findings.filter(f => order.indexOf(f.severity) >= min);
-for (const f of bad) console.error(`${f.severity.toUpperCase()} ${f.id} ${f.location.file}`);
+const fs = require("node:fs");
+const path = require("node:path");
+const order = ["low", "medium", "high", "critical"];
+const reportPath = process.argv[1];
+const threshold = process.argv[2] || "high";
+const min = order.indexOf(threshold);
+if (!reportPath || min === -1) {
+  console.error("usage: node -e <script> <report.json> <low|medium|high|critical>");
+  process.exit(2);
+}
+const r = JSON.parse(fs.readFileSync(path.resolve(reportPath), "utf8"));
+const bad = (r.findings ?? []).filter((f) => order.indexOf(f.severity) >= min);
+for (const f of bad) console.error(`${f.severity.toUpperCase()} ${f.id ?? "—"} ${f.location?.file ?? "—"}`);
 process.exit(bad.length ? 1 : 0);
 ' "<output-dir>/monorepo-doctor-report.json" high
 ```

@@ -1,6 +1,6 @@
 # Phase 2 — Source scan
 
-Reads `workspace.json`, walks every package's source files, and writes `$TMPDIR/monorepo-doctor/scan.json`:
+Reads `workspace.json`, walks every package's source files, and writes `$W/scan.json`:
 
 | key | content |
 |---|---|
@@ -11,31 +11,47 @@ Reads `workspace.json`, walks every package's source files, and writes `$TMPDIR/
 
 `kind`: `relative` (`../../other-pkg/src/x`), `package` (`@scope/pkg/sub`), `alias` (tsconfig `paths`).
 `declared`: the importing package lists the target in any dependency field.
-`deep`: the import bypasses the target's public API — any `relative` cross-package import, a subpath starting with `src/`, `lib/` or `internal/`, or a subpath not covered by the target's `exports` keys.
+`deep`: the import bypasses the target's public API — any `relative` cross-package import, a package subpath starting with `src/`, `lib/` or `internal/`, or a subpath not covered by the target's `exports` keys. Alias imports are resolved to the target package first; aliases to the target entry point stay non-deep, while aliases into `src/lib/internal` or unexported subpaths are deep.
 
 ```bash
-cat > "${TMPDIR:-/tmp}/monorepo-doctor/scan.mjs" <<'EOF'
+W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
+cat > "$W/scan.mjs" <<'EOF'
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 const work = path.join(os.tmpdir(), 'monorepo-doctor');
 const ws = JSON.parse(fs.readFileSync(path.join(work, 'workspace.json'), 'utf8'));
 const root = ws.root;
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', '.turbo', '.next', '.nx', '.git', 'lib-cov']);
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', '.turbo', '.next', '.nx', '.git', 'lib-cov', '.svelte-kit', '.docusaurus', '.output', 'storybook-static', '.vercel', '.cache']);
 const SRC = /\.(?:[cm]?[jt]sx?)$/;
-const TEST = /\.(spec|test)\.[cm]?[jt]sx?$|(^|\/)(__tests__|__mocks__)\//;
+const TEST = /\.(spec|test)\.[cm]?[jt]sx?$|(^|\/)(__tests__|__mocks__|test|tests|e2e|cypress)(\/|$)/;
 const EXTS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
 const toPosix = (p) => p.split(path.sep).join('/');
 const byDir = [...ws.packages].sort((a, b) => b.dir.length - a.dir.length);
 const owner = (relFile) => byDir.find((p) => relFile === p.dir || relFile.startsWith(p.dir + '/'));
 const byName = new Map(ws.packages.map((p) => [p.name, p]));
 
+const stripJsonc = (s) => s
+  .replace(/"(?:[^"\\]|\\.)*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) => m[0] === '"' ? m : '')
+  .replace(/"(?:[^"\\]|\\.)*"|,(\s*[}\]])/g, (m, g) => g !== undefined ? g : m);
 const readJsonc = (p) => {
-  try { return JSON.parse(fs.readFileSync(p, 'utf8').replace(/\/\*[\s\S]*?\*\/|(?<![:"'])\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1')); } catch { return null; }
+  if (!fs.existsSync(p)) return null;
+  try { return JSON.parse(stripJsonc(fs.readFileSync(p, 'utf8'))); }
+  catch (e) { console.error(`WARN: failed to parse ${toPosix(path.relative(root, p))}: ${e.message}`); return null; }
 };
-const tsBase = readJsonc(path.join(root, 'tsconfig.base.json')) ?? readJsonc(path.join(root, 'tsconfig.json')) ?? {};
+const tsBasePath = path.join(root, 'tsconfig.base.json');
+const tsConfigPath = path.join(root, 'tsconfig.json');
+const tsBaseJson = readJsonc(tsBasePath);
+const tsConfigJson = readJsonc(tsConfigPath);
+const tsBase = tsBaseJson?.compilerOptions?.paths ? tsBaseJson : (tsConfigJson?.compilerOptions?.paths ? tsConfigJson : (tsBaseJson ?? tsConfigJson ?? {}));
 const baseUrl = path.join(root, tsBase.compilerOptions?.baseUrl ?? '.');
-const aliases = Object.entries(tsBase.compilerOptions?.paths ?? {}).map(([k, v]) => ({ key: k, target: v[0] }));
+const aliases = Object.entries(tsBase.compilerOptions?.paths ?? {})
+  .map(([k, v]) => ({ key: k, target: Array.isArray(v) ? v[0] : v }))
+  .filter((a) => typeof a.target === 'string')
+  .sort((a, b) => (a.key.includes('*') - b.key.includes('*')) || b.key.replace('*', '').length - a.key.replace('*', '').length);
+function matchAlias(spec) {
+  return aliases.find((a) => a.key === spec || (a.key.endsWith('*') && spec.startsWith(a.key.slice(0, -1))));
+}
 
 function walk(dir, out) {
   let entries = [];
@@ -49,14 +65,56 @@ function walk(dir, out) {
 function resolveFile(abs) {
   const cands = [abs, ...EXTS.map((e) => abs + e), ...EXTS.map((e) => path.join(abs, 'index' + e))];
   if (/\.[cm]?js$/.test(abs)) cands.push(...['.ts', '.tsx', '.mts', '.cts'].map((e) => abs.replace(/\.[cm]?js$/, e)));
+  if (/\.jsx$/.test(abs)) cands.push(abs.replace(/\.jsx$/, '.tsx'));
   return cands.find((c) => { try { return fs.statSync(c).isFile(); } catch { return false; } }) ?? null;
 }
-function covered(exportKeys, subpath) {
-  if (!exportKeys.length) return true;
-  const want = './' + subpath;
-  return exportKeys.some((k) => k === want || (k.includes('*') && new RegExp('^' + k.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$').test(want)));
+function exportEntries(pkg) {
+  if (typeof pkg.exports === 'string') return [['.', pkg.exports]];
+  if (pkg.exports && typeof pkg.exports === 'object') return Object.entries(pkg.exports).filter(([k, v]) => k.startsWith('.') && v !== null);
+  return (pkg.exportKeys ?? []).map((k) => [k, true]);
 }
-const lineAt = (text, idx) => text.slice(0, idx).split('\n').length;
+function covered(pkg, subpath) {
+  const entries = exportEntries(pkg);
+  if (!entries.length) return true;
+  const want = './' + subpath;
+  return entries.some(([k]) => k === want || (k.endsWith('/') && want.startsWith(k)) || (k.includes('*') && new RegExp('^' + k.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$').test(want)));
+}
+const entryValues = (value) => {
+  if (typeof value === 'string') return [value];
+  if (value && typeof value === 'object') return Object.values(value).flatMap(entryValues);
+  return [];
+};
+function isEntrySubpath(pkg, subpath) {
+  const norm = (s) => s.replace(/^\.\//, '').replace(/\.[cm]?[jt]sx?$/, '').replace(/\/(?:index)$/, '/index');
+  const bare = norm(subpath);
+  const entries = new Set(['index', 'src/index']);
+  if (pkg.main) entries.add(norm(pkg.main));
+  if (typeof pkg.exports === 'string') entries.add(norm(pkg.exports));
+  else if (pkg.exports && typeof pkg.exports === 'object' && pkg.exports['.'] !== undefined && pkg.exports['.'] !== null) {
+    for (const v of entryValues(pkg.exports['.'])) entries.add(norm(v));
+  }
+  return entries.has(bare) || /(^|\/)index\.[cm]?[jt]sx?$/.test(subpath);
+}
+function lineStarts(text) {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) starts.push(i + 1);
+  return starts;
+}
+function lineAt(starts, idx) {
+  let lo = 0, hi = starts.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (starts[mid] <= idx) lo = mid + 1; else hi = mid - 1;
+  }
+  return hi + 1;
+}
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+function allNamedSpecifiersAreTypeOnly(clause = '') {
+  const m = clause.match(/\{([\s\S]*?)\}/);
+  if (!m) return false;
+  const specs = stripComments(m[1]).split(',').map((s) => s.trim()).filter(Boolean);
+  return specs.length > 0 && specs.every((s) => /^type\s+[$\w]+(?:\s+as\s+[$\w]+)?$/.test(s));
+}
 
 const scan = { packages: {}, imports: [], fileEdges: {}, env: [] };
 for (const pkg of ws.packages) {
@@ -67,16 +125,19 @@ for (const pkg of ws.packages) {
     const file = toPosix(path.relative(root, abs));
     const isTest = TEST.test(file);
     const text = fs.readFileSync(abs, 'utf8');
+    const starts = lineStarts(text);
     if (isTest) info.testFiles.push(file); else { info.sourceFiles++; info.loc += text.split('\n').length; }
     const specs = [];
-    for (const m of text.matchAll(/^[ \t]*(import|export)\s+(type\s+)?([^'";]*?\bfrom\s+)?['"]([^'"\n]+)['"]/gm)) {
+    const importRe = /^[ \t]*(import|export)\s+(type\s+)?((?:[\w$*{},\s]|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*?\bfrom\s*)?['"]([^'"\n]+)['"]/gm;
+    for (const m of text.matchAll(importRe)) {
       if (m[2]) continue;
       if (m[1] === 'export' && !m[3]) continue;
-      specs.push({ spec: m[4], line: lineAt(text, m.index + m[0].search(/\S/)) });
+      if (allNamedSpecifiersAreTypeOnly(m[3])) continue;
+      specs.push({ spec: m[4], line: lineAt(starts, m.index + m[0].search(/\S/)) });
     }
-    for (const m of text.matchAll(/\b(?:import|require)\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g)) specs.push({ spec: m[1], line: lineAt(text, m.index) });
+    for (const m of text.matchAll(/\b(?:import|require)\s*\(\s*['"]([^'"\n]+)['"]\s*\)/g)) specs.push({ spec: m[1], line: lineAt(starts, m.index) });
     for (const m of text.matchAll(/\bprocess\.env\.([A-Za-z_][\w]*)|\bprocess\.env\[\s*['"]([^'"]+)['"]\s*\]|\bimport\.meta\.env\.([A-Za-z_][\w]*)/g)) {
-      scan.env.push({ package: pkg.name, file, line: lineAt(text, m.index), name: m[1] ?? m[2] ?? m[3] });
+      scan.env.push({ package: pkg.name, file, line: lineAt(starts, m.index), name: m[1] ?? m[2] ?? m[3] });
     }
     for (const { spec, line } of specs) {
       let kind, target, subpath = '', resolved = null;
@@ -92,16 +153,21 @@ for (const pkg of ws.packages) {
         const name = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
         if (byName.has(name)) { kind = 'package'; target = name; subpath = parts.slice(spec.startsWith('@') ? 2 : 1).join('/'); }
         else {
-          const a = aliases.find((x) => x.key === spec || (x.key.endsWith('*') && spec.startsWith(x.key.slice(0, -1))));
+          const a = matchAlias(spec);
           if (!a) continue;
           const mapped = a.key.endsWith('*') ? a.target.replace('*', spec.slice(a.key.length - 1)) : a.target;
-          const t = owner(toPosix(path.relative(root, path.resolve(baseUrl, mapped))));
+          resolved = resolveFile(path.resolve(baseUrl, mapped)) ?? path.resolve(baseUrl, mapped);
+          const relResolved = toPosix(path.relative(root, resolved));
+          const t = owner(relResolved);
           if (!t || t.name === pkg.name) continue;
-          kind = 'alias'; target = t.name; subpath = '';
+          kind = 'alias'; target = t.name; subpath = relResolved.slice(t.dir.length + 1);
         }
       }
       const tp = byName.get(target);
-      const deep = kind === 'relative' || /^(src|lib|internal)(\/|$)/.test(subpath) || (subpath !== '' && !covered(tp.exportKeys, subpath));
+      const entry = isEntrySubpath(tp, subpath);
+      const deep = kind === 'relative'
+        || (kind === 'alias' ? (!entry && (/^src\/lib\/internal(\/|$)/.test(subpath) || (subpath !== '' && !covered(tp, subpath))))
+          : (/^(src|lib|internal)(\/|$)/.test(subpath) || (subpath !== '' && !covered(tp, subpath))));
       scan.imports.push({ from: pkg.name, target, kind, spec, subpath, file, line, isTest, declared: pkg.workspaceDeps.includes(target), deep });
     }
   }
@@ -117,10 +183,11 @@ console.log(JSON.stringify({
   envReads: scan.env.length,
 }));
 EOF
-node "${TMPDIR:-/tmp}/monorepo-doctor/scan.mjs"
+node "$W/scan.mjs"
 ```
 
 Notes for the agent:
 - The scan is regex-based. Commented-out imports can produce false positives — open the file at `line` to confirm before reporting.
-- Type-only imports (`import type …`, `export type … from`) are excluded because they are erased at compile time.
-- Huge repos: the scan is linear in file count; if it takes > 2 minutes, tell the user and proceed.
+- Type-only imports (`import type …`, `export type … from`, and imports whose named specifiers are all `type X`) are excluded because they are erased at compile time.
+- Environment reads using destructuring, such as `const { API_URL } = process.env`, are not detected.
+- Huge repos: the scan is linear in file count and import/env match count, with line numbers resolved by precomputed offsets; if it takes > 2 minutes, tell the user and proceed.
