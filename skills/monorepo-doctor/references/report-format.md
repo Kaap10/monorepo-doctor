@@ -39,7 +39,7 @@ Severity may be lowered one level with a stated reason (e.g., package is private
 
 ## Render
 
-After all checks, run this snippet. It validates every findings file and fails loudly (`stderr`, exit 1) if a status is outside the enum, `reason` is missing for a non-`ok` status, a finding id does not start with `<check>/`, or evidence is missing/empty. Arguments: output directory (default: workspace root).
+After all checks, run this snippet. It validates every findings file and fails loudly (`stderr`, exit 1) if a status is outside the enum, `reason` is missing for a non-`ok` status, a finding id does not start with `<check>/`, or evidence is missing/empty. Arguments: output directory (default: the original workspace root, `ws.sourceRoot`).
 
 ```bash
 W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
@@ -49,7 +49,7 @@ import os from 'node:os';
 import path from 'node:path';
 const work = path.join(os.tmpdir(), 'monorepo-doctor');
 const ws = JSON.parse(fs.readFileSync(path.join(work, 'workspace.json'), 'utf8'));
-const outDir = path.resolve(process.argv[2] ?? ws.root);
+const outDir = path.resolve(process.argv[2] ?? ws.sourceRoot ?? ws.root);
 fs.mkdirSync(outDir, { recursive: true });
 const CHECKS = ['boundaries', 'circular-deps', 'caching', 'ci-coverage', 'prod-leakage'];
 const STATUS = ['ok', 'partial', 'skipped', 'not-run'];
@@ -88,7 +88,7 @@ const summary = Object.fromEntries(SEV.map((s) => [s, findings.filter((f) => f.s
 const report = {
   version: 1,
   generatedAt: new Date().toISOString(),
-  workspace: { root: ws.root, packageManager: ws.packageManager, orchestrators: ws.orchestrators, packageCount: ws.packages.length },
+  workspace: { root: ws.sourceRoot ?? ws.root, packageManager: ws.packageManager, orchestrators: ws.orchestrators, packageCount: ws.packages.length },
   summary, checks, findings,
 };
 fs.writeFileSync(path.join(outDir, 'monorepo-doctor-report.json'), JSON.stringify(report, null, 2) + '\n');
@@ -115,7 +115,7 @@ if (!findings.length) md.push('No findings. 🎉', '');
 fs.writeFileSync(path.join(outDir, 'monorepo-doctor-report.md'), md.join('\n'));
 console.log(JSON.stringify({ outDir, summary }));
 EOF
-node "$W/render.mjs" "<output-dir>"   # replace <output-dir> with a literal path; omit it to write to the workspace root
+node "$W/render.mjs" "<output-dir>"   # replace <output-dir> with a literal path; omit it to write to the original workspace root (ws.sourceRoot), not the snapshot
 ```
 
 ## CI mode

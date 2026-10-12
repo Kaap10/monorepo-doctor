@@ -11,8 +11,8 @@ Prerequisites: Node ≥ 22.5. The work dir is `$W` = `$(node -p 'require("os").t
 
 ## Rules
 
-- **Read-only.** Never install dependencies, build, run tests, or edit project files. Allowed writes: `monorepo-doctor-report.md`, `monorepo-doctor-report.json` (workspace root or a user-given dir) and `$W`.
-- Allowed commands: the snippets in the reference files, `npx --yes knip@6.41.0`, `npm_config_ignore_scripts=true npx --yes publint@0.3.25` (exact pinned versions — never unpinned or `@latest`; bump only after review), `npm pack --dry-run --json --ignore-scripts`, read-only `git log`, and `npx nx` / `npx turbo` **only if** detection reports them `installed` (graph / `--dry=json` / `boundaries` only — never real task runs, with read-only env vars from the references).
+- **Read-only.** Never install dependencies, build, run tests, or edit project files. Detection copies the repo to a snapshot at `$W/src` (`ws.root`) with `node_modules` symlinked. Run every later command and tool from the snapshot, never from the user's checkout (see detection.md). Allowed writes: `monorepo-doctor-report.md` and `monorepo-doctor-report.json` (original workspace root or a user-given dir), and `$W`.
+- Allowed commands: the snippets in the reference files, `npx --yes knip@6.41.0`, `npm_config_ignore_scripts=true npx --yes publint@0.3.25` (exact pinned versions — never unpinned or `@latest`; bump only after review), `npm pack --dry-run --json --ignore-scripts`, read-only `git -C <sourceRoot> log`, and `npx nx` / `npx turbo` **only if** detection reports them `installed` (graph / `--dry=json` / `boundaries` only — never real task runs, with read-only env vars from the references).
 - **Never abort a check.** If a tool fails, mark the check `partial` or `skipped` with a reason and continue.
 - **Every finding needs evidence** (config snippet, file:line, or command output). No evidence → no finding.
 - **Actionable only.** Do not emit a finding when the honest fix is "keep it as-is" — a deliberate, idiomatic or correct pattern (e.g. `cache: false` on a migration task, lazy ORM references). Mention it in the check's `reason` instead.

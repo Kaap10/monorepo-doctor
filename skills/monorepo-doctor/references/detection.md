@@ -5,7 +5,11 @@ Goal: build an inventory at `$W/workspace.json`. Every later phase reads it.
 Requires Node ≥ 22.5 because this phase uses `fs.globSync` and `path.matchesGlob`. The snippet below exits 2 with `monorepo-doctor requires Node >= 22.5` when either API is missing.
 This phase resets the work directory. In every shell, start with `W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"`; all later phases reuse `$W`, and you should recompute it in each new shell. `os.tmpdir()` honors `TMPDIR`: if the default temp dir is not writable in your environment, `export TMPDIR=<writable dir outside the audited repo>` in every shell before computing `$W`, so the shell and the Node snippets agree.
 
-Run from the workspace root (the directory the user pointed at; default: current directory):
+Detection reads the workspace the user pointed at (default: current directory), then copies it to a **snapshot** at `$W/src` (`ws.root`; the original path is `ws.sourceRoot`). The copy skips `.git`, `.turbo`, `.nx`, `.cache` and `.next/cache`, keeps build outputs such as `dist`, and symlinks every `node_modules` directory to the original rather than copying it.
+
+**All later phases run against `ws.root`:** every `cd`, `npx`, `npm pack` and tool path uses the snapshot, so tool caches and side effects never land in the user's checkout. The only commands that touch `ws.sourceRoot` are the read-only `git -C "<sourceRoot>" log` in caching.md and writing the final reports. Do not write into any `node_modules` symlink, because it points at the user's real install.
+
+Run:
 
 ```bash
 W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
@@ -141,16 +145,36 @@ const ci = [
   ...['.gitlab-ci.yml', 'azure-pipelines.yml', '.circleci/config.yml', 'bitbucket-pipelines.yml', 'Jenkinsfile', '.travis.yml'].filter(exists),
 ];
 
+if (!packages.length) { console.error('NO_WORKSPACE: no workspace packages found under ' + root); process.exit(2); }
+
+// Snapshot: every later phase reads and runs tools against a copy, never the user's checkout.
+const snap = path.join(work, 'src');
+if (!path.relative(root, snap).startsWith('..')) { console.error(`SNAPSHOT_FAILED: work dir ${work} is inside ${root}; set TMPDIR outside the repo`); process.exit(3); }
+const SNAP_SKIP = new Set(['.git', '.turbo', '.nx', '.cache']);
+const linkDirs = [];
+try {
+  fs.cpSync(root, snap, {
+    recursive: true, verbatimSymlinks: true,
+    filter: (src) => {
+      const b = path.basename(src);
+      if (b === 'node_modules') { linkDirs.push(path.relative(root, src)); return false; }
+      if (src !== root && SNAP_SKIP.has(b)) return false;
+      return !(b === 'cache' && path.basename(path.dirname(src)) === '.next');
+    },
+  });
+  // node_modules is linked, not copied: tools resolve dependencies from the original install.
+  for (const rel of linkDirs) fs.symlinkSync(path.join(root, rel), path.join(snap, rel), 'junction');
+} catch (e) { console.error(`SNAPSHOT_FAILED: ${e.message}`); process.exit(3); }
+
 const ws = {
-  root, packageManager: pm, orchestrators, workspaceGlobs: globs,
+  root: snap, sourceRoot: root, packageManager: pm, orchestrators, workspaceGlobs: globs,
   rootScripts: rootPkg.scripts ?? {},
   hasNodeModules: exists('node_modules'),
   ciFiles: ci.map(toPosix),
   packages,
 };
 fs.writeFileSync(path.join(work, 'workspace.json'), JSON.stringify(ws, null, 2));
-if (!packages.length) { console.error('NO_WORKSPACE: no workspace packages found under ' + root); process.exit(2); }
-console.log(JSON.stringify({ root, packageManager: pm, orchestrators, packages: packages.length, ciFiles: ws.ciFiles.length }));
+console.log(JSON.stringify({ root: snap, sourceRoot: root, packageManager: pm, orchestrators, packages: packages.length, ciFiles: ws.ciFiles.length }));
 EOF
 node "$W/detect.mjs" "<workspace-root>"
 ```
@@ -158,6 +182,7 @@ node "$W/detect.mjs" "<workspace-root>"
 ## Interpreting the result
 
 - Exit code 2 / `NO_WORKSPACE`: this is not a monorepo. Stop and tell the user; do not produce a report.
+- Exit code 3 / `SNAPSHOT_FAILED`: the copy failed (disk space, unreadable or special files, or a work dir inside the repo). Stop and tell the user. Never fall back to auditing the original in place.
 - `orchestrators[].installed: false`: never call `npx nx` / `npx turbo` (it would download a different version). Use static config analysis only, and mark dependent sub-steps `partial`.
 - `hasNodeModules: false`: skip `knip` and any step that needs resolved dependencies; mark `partial`.
 - `packages[].source === "project.json"`: an Nx project without its own package.json — package.json-based rules (missing test script, undeclared dependency, npm pack) do not apply to it.
