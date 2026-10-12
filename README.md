@@ -60,7 +60,7 @@ Run monorepo-doctor in CI mode, fail on high.
 
 ## Output
 
-The skill writes two report files in the workspace root or a user-specified output directory:
+The skill writes two report files to `$(node -p 'require("os").tmpdir()')/monorepo-doctor-reports` by default (outside your repo), or to an output directory you name in the prompt:
 
 - `monorepo-doctor-report.md` — human-readable audit report
 - `monorepo-doctor-report.json` — structured report with `summary`, per-check status, and full findings
@@ -197,7 +197,7 @@ Fixtures live under `fixtures/` and describe seeded monorepo problems for generi
 Use `scripts/verify-fixture.mjs` to compare a generated report with an expected fixture contract:
 
 ```bash
-node scripts/verify-fixture.mjs monorepo-doctor-report.json fixtures/expected/generic-pnpm.json
+node scripts/verify-fixture.mjs "$(node -p 'require("os").tmpdir()')/monorepo-doctor-reports/monorepo-doctor-report.json" fixtures/expected/generic-pnpm.json
 ```
 
 `npm run check` validates the skill frontmatter, reference links, and finding-id coverage. It should print:
