@@ -15,13 +15,12 @@ File cycles cause `undefined`/TDZ errors only when a module reads an imported bi
 1. If Nx is installed, refresh the graph and use it as the package graph:
    ```bash
    W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
-   cd "$W/src"
    rm -f "$W/nx-graph.json" "$W/nx-graph.failed"
    NX_DAEMON=false NX_NO_CLOUD=true NX_WORKSPACE_DATA_DIRECTORY="$W/nx-data" npx nx graph --file="$W/nx-graph.json" \
      || touch "$W/nx-graph.failed"
    ```
    The file has `graph.dependencies[project] = [{ target }]`. Otherwise use `workspace.json` `workspaceDeps`.
-   If Turborepo is installed, `cd "$W/src" && TURBO_TELEMETRY_DISABLED=1 npx turbo run build --dry=json` failing with a message containing `cyclic` is also evidence. Turbo dry-run JSON writes no project files beyond Turborepo's own cache directory.
+   If Turborepo is installed, `TURBO_TELEMETRY_DISABLED=1 npx turbo run build --dry=json` failing with a message containing `cyclic` is also evidence. Turbo dry-run JSON writes no project files beyond Turborepo's own cache directory.
    Status: the `workspaceDeps` graph is complete for package.json-based workspaces, so missing turbo does **not** make this check partial. Under Nx without a local install, mark `partial` with reason `nx not installed; project graph inferred from package.json only`; if Nx is installed but `nx graph` fails, mark `partial` with reason `nx graph failed; project graph inferred from package.json only` (Nx also infers edges from imports and `implicitDependencies`).
 2. Run the cycle snippet:
 

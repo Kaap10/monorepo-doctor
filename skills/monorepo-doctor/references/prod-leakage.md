@@ -21,7 +21,7 @@ Test libraries: `vitest`, `jest`, `@jest/*`, `mocha`, `chai`, `sinon`, `@testing
 1. For each publishable package (non-private, `source: package.json`):
    ```bash
    W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
-   (cd "<ws.root>/<pkg-dir>" && npm pack --dry-run --json --ignore-scripts 2>&1)
+   (cd "<pkg-dir>" && npm pack --dry-run --json --ignore-scripts 2>&1)
    ```
    Parse `[0].files[].path`; any match of the test pattern → `test-files-in-package` (list up to 10 in `evidence`).
    Parse stdout as JSON. If `npm pack` fails (e.g. `workspace:` protocol under npm), capture the first stderr/stdout line, then fall back to reasoning: if the package has no `files` field and no `.npmignore`, every file not in `.gitignore` ships — compare against `scan.packages[p].testFiles`. If `.npmignore` exists without `files`, honor its simple ignore/negation patterns where possible and state that this is a fallback. If `files` is present, test files ship only if a `files` entry matches them. If `publishConfig.directory` is set, evaluate that directory as the publish root. State in `evidence` that the fallback was used and include the first failure line.
@@ -31,7 +31,7 @@ Test libraries: `vitest`, `jest`, `@jest/*`, `mocha`, `chai`, `sinon`, `@testing
 5. If `hasNodeModules`, for each publishable package that has its build output present:
    ```bash
    W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
-   npm_config_ignore_scripts=true npx --yes publint@0.3.25 "<ws.root>/<pkg-dir>" 2>&1
+   npm_config_ignore_scripts=true npx --yes publint@0.3.25 "<pkg-dir>" 2>&1
    ```
    publint prints sections `Errors:`, `Warnings:`, `Suggestions:` followed by numbered messages. One finding per message. Skip when `node_modules` is missing. Skip unbuilt packages and set status `partial` with reason `publint skipped for unbuilt packages: …`.
 6. Write `findings/prod-leakage.json`.
