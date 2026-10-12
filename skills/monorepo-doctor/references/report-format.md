@@ -39,7 +39,7 @@ Severity may be lowered one level with a stated reason (e.g., package is private
 
 ## Render
 
-After all checks, run this snippet. It validates every findings file and fails loudly (`stderr`, exit 1) if a status is outside the enum, `reason` is missing for a non-`ok` status, a finding id does not start with `<check>/`, or evidence is missing/empty. Arguments: output directory (default: workspace root).
+After all checks, run this snippet. It validates every findings file and fails loudly (`stderr`, exit 1) if a status is outside the enum, `reason` is missing for a non-`ok` status, a finding id does not start with `<check>/`, or evidence is missing/empty. Arguments: output directory (default: `$(node -p 'require("os").tmpdir()')/monorepo-doctor-reports`). The default is outside `$W` because detection wipes `$W`. Write into the audited repo only when the user gives that path explicitly.
 
 ```bash
 W="$(node -p 'require("os").tmpdir()')/monorepo-doctor"
@@ -49,7 +49,7 @@ import os from 'node:os';
 import path from 'node:path';
 const work = path.join(os.tmpdir(), 'monorepo-doctor');
 const ws = JSON.parse(fs.readFileSync(path.join(work, 'workspace.json'), 'utf8'));
-const outDir = path.resolve(process.argv[2] ?? ws.root);
+const outDir = path.resolve(process.argv[2] ?? path.join(os.tmpdir(), 'monorepo-doctor-reports'));
 fs.mkdirSync(outDir, { recursive: true });
 const CHECKS = ['boundaries', 'circular-deps', 'caching', 'ci-coverage', 'prod-leakage'];
 const STATUS = ['ok', 'partial', 'skipped', 'not-run'];
@@ -115,8 +115,10 @@ if (!findings.length) md.push('No findings. 🎉', '');
 fs.writeFileSync(path.join(outDir, 'monorepo-doctor-report.md'), md.join('\n'));
 console.log(JSON.stringify({ outDir, summary }));
 EOF
-node "$W/render.mjs" "<output-dir>"   # replace <output-dir> with a literal path; omit it to write to the workspace root
+node "$W/render.mjs" "<output-dir>"   # replace <output-dir> with a literal path; use the user-given path, or omit it to write to <tmpdir>/monorepo-doctor-reports
 ```
+
+Tell the user the absolute report paths (the render step prints `outDir`).
 
 ## CI mode
 

@@ -7,7 +7,7 @@ Inputs: `workspace.json`, `scan.json`. Output: `findings/boundaries.json`.
 
 | id | severity | detect | evidence |
 |---|---|---|---|
-| `boundaries/oversized-package` | low | `scan.packages[p].sourceFiles > 500` or `loc > 50000` | counts |
+| `boundaries/oversized-package` | low | `scan.packages[p].sourceFiles > 500` or `loc > 50000` (generated files are already excluded by scan) **and** at least 2 other workspace packages import it (`scan.imports` with `target === p`). Apps and leaf packages with no workspace consumers are never flagged: splitting them adds export maps and tags with no consumer that benefits. | counts + the consumers and which subpaths/symbols each uses |
 | `boundaries/deep-import` | medium | each `scan.imports` entry with `deep && (declared \|\| fromSource === "project.json")` (undeclared package.json importers are reported by ci-coverage instead) | file:line + import specifier + target's `exports` keys |
 | `boundaries/unlisted-dependency` | medium | knip `unlisted` entries | knip output line |
 | `boundaries/unused-dependency` | low | knip `dependencies` / `devDependencies` entries | knip output line |
@@ -39,5 +39,5 @@ Group `deep-import` findings: one finding per (from, target) pair, listing up to
 ## Fix guidance
 
 - deep-import: add the subpath to the target's `exports`, or re-export from its entry point, then import from the package root.
-- oversized-package: identify clusters by directory and by which consumers import which files (`scan.imports` subpaths); propose 2–3 candidate splits.
+- oversized-package: identify clusters by which consumers import which files (`scan.imports` subpaths); propose 2–3 splits along clusters used by different consumers. If every consumer uses the same parts, don't emit the finding.
 - nx-missing-module-boundaries-rule: add `@nx/enforce-module-boundaries` with `depConstraints` based on `scope:*`/`type:*` tags.
