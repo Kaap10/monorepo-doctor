@@ -43,13 +43,39 @@ test('allNamedSpecifiersAreTypeOnly: returns false when no braces exist', () => 
   assert.equal(allNamedSpecifiersAreTypeOnly(''), false);
 });
 
-test('scanner import logic retains default import when mixed with type specifiers', () => {
-  const importRe = /^[ \t]*(import|export)\s+(type\s+)?((?:(?!\n[ \t]*(?:import|export)\b)[\w$*{},\s]|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*?\bfrom\s*)?['"]([^'"\n]+)['"]/gm;
-  const line = "import Button, { type ButtonProps } from '@acme/ui';";
-  const m = [...line.matchAll(importRe)][0];
+const lineStartsMatch = scanMd.match(/function lineStarts\(text\) \{[\s\S]*?\n\}/);
+const lineAtMatch = scanMd.match(/function lineAt\(starts, idx\) \{[\s\S]*?\n\}/);
+const importLoopMatch = scanMd.match(/const importRe = [^;]+;[\s\S]*?for \(const m of text\.matchAll\(importRe\)\) \{[\s\S]*?\n    \}/);
 
-  assert.ok(m, 'import line should match importRe');
-  assert.equal(m[2], undefined, 'statement should not be marked import type');
-  assert.equal(allNamedSpecifiersAreTypeOnly(m[3]), false, 'should not be dropped as type-only');
-  assert.equal(m[4], '@acme/ui', 'target specifier should be extracted');
+assert.ok(lineStartsMatch, 'lineStarts should be defined in scan.md');
+assert.ok(lineAtMatch, 'lineAt should be defined in scan.md');
+assert.ok(importLoopMatch, 'import loop should be defined in scan.md');
+
+const extractSpecsFromScanMd = new Function(
+  'text',
+  `${lineStartsMatch[0]};
+   ${lineAtMatch[0]};
+   ${stripCommentsMatch[0]};
+   ${allNamedMatch[0]};
+   const starts = lineStarts(text);
+   const specs = [];
+   ${importLoopMatch[0]};
+   return specs;`
+);
+
+test('scanner import logic retains default import when mixed with type specifiers', () => {
+  const code = "import Button, { type ButtonProps } from '@acme/ui';\n";
+  const specs = extractSpecsFromScanMd(code);
+
+  assert.equal(specs.length, 1, 'scanner loop should extract one import');
+  assert.equal(specs[0].spec, '@acme/ui', 'extracted specifier should be @acme/ui');
+  assert.equal(specs[0].line, 1, 'extracted line number should be 1');
 });
+
+test('scanner import logic drops pure type-only imports', () => {
+  const code = "import { type ComponentProps } from '@acme/types';\n";
+  const specs = extractSpecsFromScanMd(code);
+
+  assert.equal(specs.length, 0, 'scanner loop should drop pure type-only imports');
+});
+
