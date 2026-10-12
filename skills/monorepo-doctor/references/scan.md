@@ -4,7 +4,7 @@ Reads `workspace.json`, walks every package's source files, and writes `$W/scan.
 
 | key | content |
 |---|---|
-| `packages[name]` | `{ sourceFiles, testFiles: [file], loc }` |
+| `packages[name]` | `{ sourceFiles, testFiles: [file], loc }` (`sourceFiles`/`loc` exclude tests and generated files: `*.gen.*`, `*.generated.*`, `__generated__/`) |
 | `imports` | every import that crosses a package boundary: `{ from, fromSource, target, kind, spec, subpath, file, line, isTest, declared, deep }` |
 | `fileEdges[name]` | intra-package `[fromFile, toFile]` edges from value imports (type-only imports excluded) |
 | `env` | `{ package, file, line, name, isTest }` for `process.env.X`, `process.env['X']`, `import.meta.env.X` |
@@ -25,6 +25,7 @@ const ws = JSON.parse(fs.readFileSync(path.join(work, 'workspace.json'), 'utf8')
 const root = ws.root;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', '.turbo', '.next', '.nx', '.git', 'lib-cov', '.svelte-kit', '.docusaurus', '.output', 'storybook-static', '.vercel', '.cache']);
 const SRC = /\.(?:[cm]?[jt]sx?)$/;
+const GENERATED = /(\.gen|\.generated)\.[cm]?[jt]sx?$|(^|\/)__generated__\//;
 const TEST = /\.(spec|test)\.[cm]?[jt]sx?$|(^|\/)(__tests__|__mocks__|test|tests|e2e|cypress)(\/|$)/;
 const EXTS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
 const toPosix = (p) => p.split(path.sep).join('/');
@@ -128,7 +129,7 @@ for (const pkg of ws.packages) {
     const isTest = TEST.test(packageRel);
     const text = fs.readFileSync(abs, 'utf8');
     const starts = lineStarts(text);
-    if (isTest) info.testFiles.push(file); else { info.sourceFiles++; info.loc += text.split('\n').length; }
+    if (isTest) info.testFiles.push(file); else if (!GENERATED.test(packageRel)) { info.sourceFiles++; info.loc += text.split('\n').length; }
     const specs = [];
     const importRe = /^[ \t]*(import|export)\s+(type\s+)?((?:(?!\n[ \t]*(?:import|export)\b)[\w$*{},\s]|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*?\bfrom\s*)?['"]([^'"\n]+)['"]/gm;
     for (const m of text.matchAll(importRe)) {
